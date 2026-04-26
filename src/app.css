@@ -36,19 +36,8 @@ body {
 	background: var(--bg);
 }
 
-::-webkit-scrollbar {
-	width: 6px;
-	height: 6px;
-}
-
-::-webkit-scrollbar-track {
-	background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-	background: var(--border-hover);
-	border-radius: 3px;
-}
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
 
 ::selection {
 	background: var(--accent);

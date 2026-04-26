@@ -1,7 +1,11 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { fade, slide } from 'svelte/transition';
 	import { DNS_GROUPS, DNS_TYPE_INFO, ALL_DNS_TYPES, formatTTL } from '$lib/dns-types';
 	import type { DnsTypeResult } from '$lib/dns-types';
+
+	let { data } = $props();
 	import { geoEquirectangular, geoPath, geoGraticule10 } from 'd3-geo';
 	import { feature } from 'topojson-client';
 	import worldJson from 'world-atlas/countries-110m.json';
@@ -26,7 +30,7 @@
 	// ─── State ───────────────────────────────────────────────────────────────────
 
 	let query       = $state('');
-	let activeGroup = $state<GroupKey>('core');
+	let activeGroup = $state<GroupKey>('all');
 	let submitted   = $state('');
 
 	let dnsRecords  = $state<Record<string, DnsTypeResult>>({});
@@ -86,7 +90,9 @@
 
 	const filteredRecords = $derived(() => {
 		const types = getTypesForGroup(activeGroup);
-		return Object.fromEntries(Object.entries(dnsRecords).filter(([t]) => types.includes(t)));
+		return Object.fromEntries(
+			Object.entries(dnsRecords).filter(([t, r]) => types.includes(t) && (r as DnsTypeResult).answers.length > 0)
+		);
 	});
 
 	const totalDnsFound = $derived(() =>
@@ -94,7 +100,9 @@
 	);
 
 	function countForGroup(key: GroupKey): number {
-		return Object.keys(dnsRecords).filter((t) => getTypesForGroup(key).includes(t)).length;
+		return Object.entries(dnsRecords).filter(([t, r]) =>
+			getTypesForGroup(key).includes(t) && (r as DnsTypeResult).answers.length > 0
+		).length;
 	}
 
 	// ─── Actions ─────────────────────────────────────────────────────────────────
@@ -109,6 +117,8 @@
 		propResults = [];
 		dnsError    = '';
 		rdapError   = '';
+		activeGroup = 'all';
+		goto(`/?d=${encodeURIComponent(domain)}`, { replaceState: false, noScroll: true, keepFocus: true });
 		searchDNS(domain);
 		searchRDAP(domain);
 		searchPropagation(domain);
@@ -146,6 +156,13 @@
 		finally { propLoading = false; }
 	}
 
+	onMount(() => {
+		if (data.domain) {
+			query = data.domain;
+			submit();
+		}
+	});
+
 	let openNotices = $state(new Set<number>());
 
 	function toggleNotice(i: number) {
@@ -157,6 +174,7 @@
 	function reset() {
 		submitted = ''; query = ''; dnsRecords = {}; rdapData = null; propResults = []; dnsError = ''; rdapError = '';
 		openNotices = new Set(); propType = 'A';
+		goto('/', { replaceState: false, noScroll: true });
 	}
 
 	function handleKeydown(e: KeyboardEvent) { if (e.key === 'Enter') submit(); }
@@ -365,7 +383,7 @@
 						autocapitalize="none"
 					/>
 					<button class="search-btn" onclick={submit} disabled={!query.trim()}>
-						<span>Query</span>
+						<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10.533 1.27893C5.35215 1.27893 1.12598 5.41887 1.12598 10.5579C1.12598 15.697 5.35215 19.8369 10.533 19.8369C12.767 19.8369 14.8235 19.0671 16.4402 17.7794L20.7929 22.132C21.1834 22.5226 21.8166 22.5226 22.2071 22.132C22.5976 21.7415 22.5976 21.1083 22.2071 20.7178L17.8634 16.3741C19.1616 14.7849 19.94 12.7634 19.94 10.5579C19.94 5.41887 15.7138 1.27893 10.533 1.27893ZM3.12598 10.5579C3.12598 6.55226 6.42768 3.27893 10.533 3.27893C14.6383 3.27893 17.94 6.55226 17.94 10.5579C17.94 14.5636 14.6383 17.8369 10.533 17.8369C6.42768 17.8369 3.12598 14.5636 3.12598 10.5579Z"/></svg>
 					</button>
 				</div>
 				<p class="hero-hint">Queries A, AAAA, MX, NS, TXT, CNAME, SOA, CAA and 30+ more record types</p>
@@ -402,7 +420,7 @@
 						{#if dnsLoading || rdapLoading}
 							<span class="spinner"></span>
 						{:else}
-							<span>Query</span>
+							<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10.533 1.27893C5.35215 1.27893 1.12598 5.41887 1.12598 10.5579C1.12598 15.697 5.35215 19.8369 10.533 19.8369C12.767 19.8369 14.8235 19.0671 16.4402 17.7794L20.7929 22.132C21.1834 22.5226 21.8166 22.5226 22.2071 22.132C22.5976 21.7415 22.5976 21.1083 22.2071 20.7178L17.8634 16.3741C19.1616 14.7849 19.94 12.7634 19.94 10.5579C19.94 5.41887 15.7138 1.27893 10.533 1.27893ZM3.12598 10.5579C3.12598 6.55226 6.42768 3.27893 10.533 3.27893C14.6383 3.27893 17.94 6.55226 17.94 10.5579C17.94 14.5636 14.6383 17.8369 10.533 17.8369C6.42768 17.8369 3.12598 14.5636 3.12598 10.5579Z"/></svg>
 						{/if}
 					</button>
 				</div>
@@ -436,7 +454,7 @@
 
 			<div class="results-grid">
 
-				<!-- ════════════════ DNS COLUMN ════════════════ -->
+					<!-- ════════════════ DNS COLUMN (right on desktop) ════════════════ -->
 				<section class="col dns-col">
 					<div class="col-header">
 						<span class="col-title">DNS</span>
@@ -447,17 +465,17 @@
 
 					<div class="group-filter">
 						{#each groups as g}
-							<button
-								class="group-btn"
-								class:active={activeGroup === g.key}
-								onclick={() => (activeGroup = g.key)}
-							>
-								{g.label}
-								{#if g.key !== 'all'}
-									{@const n = countForGroup(g.key)}
-									{#if n > 0}<span class="group-count">{n}</span>{/if}
-								{/if}
-							</button>
+							{@const n = g.key === 'all' ? Object.keys(dnsRecords).length : countForGroup(g.key)}
+							{#if g.key === 'all' || n > 0}
+								<button
+									class="group-btn"
+									class:active={activeGroup === g.key}
+									onclick={() => (activeGroup = g.key)}
+								>
+									{g.label}
+									{#if g.key !== 'all' && n > 0}<span class="group-count">{n}</span>{/if}
+								</button>
+							{/if}
 						{/each}
 					</div>
 
@@ -494,8 +512,11 @@
 					{/if}
 				</section>
 
-				<!-- ════════════════ RDAP COLUMN ════════════════ -->
-				<section class="col rdap-col">
+				<!-- ════════════════ LEFT COL: PROPAGATION + RDAP ════════════════ -->
+				<div class="left-col">
+
+				<!-- ════ RDAP (rendered last in HTML so it comes after prop) ════ -->
+				<section class="col rdap-col" style="order:2">
 					<div class="col-header">
 						<span class="col-title">RDAP</span>
 						{#if rdapData && !rdapLoading}
@@ -836,11 +857,9 @@
 					{/if}
 				</section>
 
-			</div><!-- /results-grid -->
-
-			<!-- ════════════════ PROPAGATION ════════════════ -->
+			<!-- ════════════════ PROPAGATION (above RDAP) ════════════════ -->
 			{#if propLoading || propResults.length > 0}
-				<div class="prop-section" transition:fade={{ duration: 200 }}>
+				<div class="prop-section" style="order:1" transition:fade={{ duration: 200 }}>
 					<div class="prop-header">
 						<span class="prop-title">PROPAGATION</span>
 						{#if !propLoading}
@@ -945,6 +964,9 @@
 				</div>
 			{/if}
 
+			</div><!-- /left-col -->
+			</div><!-- /results-grid -->
+
 		</div><!-- /results-container -->
 		{/if}<!-- /dnsLoading -->
 	</div><!-- /results-layout -->
@@ -983,18 +1005,13 @@
 		color: var(--accent-text);
 		border: none;
 		border-radius: 0 5px 5px 0;
-		padding: 0 1.5rem;
+		padding: 0 1.1rem;
 		min-height: 3.125rem;
-		font-family: var(--mono);
-		font-size: 0.78rem;
-		font-weight: 600;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
 		cursor: pointer;
 		transition: opacity 0.15s;
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
+		justify-content: center;
 	}
 
 	.search-btn:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -1022,7 +1039,7 @@
 
 	.hero-inner {
 		width: 100%;
-		max-width: 680px;
+		max-width: 425px;
 		display: flex;
 		flex-direction: column;
 		gap: 2.5rem;
@@ -1091,20 +1108,23 @@
 	}
 
 	.top-bar-inner {
+		position: relative;
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		max-width: 1280px;
+		justify-content: center;
+		width: 95%;
+		max-width: 1800px;
 		margin: 0 auto;
-		padding: 0.625rem 1.5rem;
+		padding: 0.625rem 0;
 	}
 
 	.top-brand {
+		position: absolute;
+		left: 0;
 		background: transparent;
 		border: none;
 		cursor: pointer;
 		padding: 0.25rem 0;
-		flex-shrink: 0;
 	}
 
 	.top-brand-text {
@@ -1115,7 +1135,8 @@
 	}
 
 	.top-search-wrap {
-		flex: 1;
+		width: 525px;
+		max-width: calc(100% - 5rem);
 		display: flex;
 		align-items: center;
 		border: 1px solid var(--border);
@@ -1127,14 +1148,14 @@
 
 	.top-search-wrap:focus-within { border-color: var(--accent); }
 	.top-search-wrap .search-input { padding: 0.6rem 0; font-size: 0.9rem; }
-	.top-search-wrap .search-btn { min-height: 2.625rem; font-size: 0.72rem; padding: 0 1.2rem; }
+	.top-search-wrap .search-btn { min-height: 2.625rem; padding: 0 0.9rem; }
 
 	.results-container {
 		flex: 1;
-		max-width: 1280px;
-		width: 100%;
+		width: 95%;
+		max-width: 1800px;
 		margin: 0 auto;
-		padding: 1.5rem 1.5rem 5rem;
+		padding: 1.5rem 0 5rem;
 	}
 
 	.domain-label {
@@ -1151,10 +1172,15 @@
 
 	.results-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1.5rem;
+		grid-template-columns: 2fr 1.25fr;
+		column-gap: 1.75rem;
+		row-gap: 0;
 		align-items: start;
 	}
+
+	/* Desktop: DNS right (col 2), left-col left (col 1) */
+	.dns-col  { grid-column: 2; grid-row: 1; position: sticky; top: 4.5rem; max-height: calc(100dvh - 5.5rem); overflow-y: auto; }
+	.left-col { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 0; min-width: 0; overflow: hidden; }
 
 	/* ─── Column shared ─────────────────────────────────────────────────────── */
 
@@ -1517,13 +1543,16 @@
 
 	@media (max-width: 840px) {
 		.results-grid { grid-template-columns: 1fr; }
+		/* Mobile order: DNS (row 1), then left-col — RDAP + Prop (row 2) */
+		.dns-col  { grid-column: 1; grid-row: 1; position: static; max-height: none; overflow-y: visible; }
+		.left-col { grid-column: 1; grid-row: 2; }
 		.type-desc { display: none; }
 	}
 
 	/* ── Tablet / large phone ──────────────────────────────────────────────── */
 	@media (max-width: 640px) {
-		.top-bar-inner { padding: 0.45rem 1rem; }
-		.results-container { padding: 1rem 1rem 4rem; }
+		.top-bar-inner    { width: 92%; padding: 0.45rem 0; }
+		.results-container { width: 92%; padding: 1rem 0 4rem; }
 		.prop-type-pill { padding: 0.3rem 0.65rem; font-size: 0.7rem; }
 		.prop-type-bar { gap: 0.35rem; }
 	}
@@ -1554,8 +1583,8 @@
 		.hero-layout { padding: 2rem 1rem; }
 		.brand-name, .brand-cursor { font-size: 1.75rem; }
 		.search-btn { padding: 0 1rem; }
-		.results-container { padding: 1rem 0.875rem 4rem; }
-		.top-bar-inner { padding: 0.4rem 0.875rem; gap: 0.5rem; }
+		.results-container { width: 92%; padding: 1rem 0 4rem; }
+		.top-bar-inner { width: 92%; padding: 0.4rem 0; gap: 0.5rem; }
 		.top-search-wrap .search-btn { padding: 0 0.875rem; }
 
 		/* Tighter record entries */
@@ -1567,8 +1596,8 @@
 	@media (max-width: 400px) {
 		.hero-layout { padding: 1.5rem 0.875rem; }
 		.brand-name, .brand-cursor { font-size: 1.5rem; }
-		.results-container { padding: 0.875rem 0.75rem 3.5rem; }
-		.top-bar-inner { padding: 0.375rem 0.75rem; gap: 0.375rem; }
+		.results-container { width: 92%; padding: 0.875rem 0 3.5rem; }
+		.top-bar-inner { width: 92%; padding: 0.375rem 0; gap: 0.375rem; }
 		.top-brand-text { font-size: 0.85rem; }
 
 		/* Stack RDAP label + value vertically to avoid cramping */
@@ -1589,9 +1618,13 @@
 	/* ─── Propagation ────────────────────────────────────────────────────────── */
 
 	.prop-section {
-		margin-top: 2.5rem;
+		padding-bottom: 1.75rem;
+	}
+	/* RDAP comes after prop in left-col — add separator on top */
+	.left-col .rdap-col {
 		border-top: 1px solid var(--border);
 		padding-top: 1.75rem;
+		margin-top: 0.25rem;
 	}
 
 	.prop-header {
