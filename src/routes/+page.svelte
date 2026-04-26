@@ -2,14 +2,14 @@
 	import { fade, slide } from 'svelte/transition';
 	import { DNS_GROUPS, DNS_TYPE_INFO, ALL_DNS_TYPES, formatTTL } from '$lib/dns-types';
 	import type { DnsTypeResult } from '$lib/dns-types';
-	import { geoNaturalEarth1, geoPath, geoGraticule10 } from 'd3-geo';
+	import { geoEquirectangular, geoPath, geoGraticule10 } from 'd3-geo';
 	import { feature } from 'topojson-client';
 	import worldJson from 'world-atlas/countries-110m.json';
 	import 'flag-icons/css/flag-icons.min.css';
 
 	// ─── World map (computed once, module-level) ─────────────────────────────────
 	const MAP_W = 960, MAP_H = 500;
-	const _proj  = geoNaturalEarth1().fitSize([MAP_W, MAP_H], { type: 'Sphere' });
+	const _proj  = geoEquirectangular().fitSize([MAP_W, MAP_H], { type: 'Sphere' });
 	const _path  = geoPath(_proj);
 	const _land  = feature(worldJson as any, (worldJson as any).objects.land);
 	const _grat  = geoGraticule10();
@@ -36,28 +36,36 @@
 	let dnsError    = $state('');
 	let rdapError   = $state('');
 
+	const ALL_PROP_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR', 'SRV', 'SOA', 'TXT', 'CAA', 'DS', 'DNSKEY'] as const;
+
 	interface PropResult {
 		id: string; name: string; city: string; flag: string; iso: string;
 		lat: number; lon: number;
-		ips: string[]; ttl: number | null;
+		records: string[]; ttl: number | null;
 		status: 'ok' | 'nxdomain' | 'error' | 'timeout'; ms: number;
 	}
 	let propResults  = $state<PropResult[]>([]);
 	let propLoading  = $state(false);
+	let propType     = $state('A');
 	let mapTooltip   = $state<{ r: PropResult; x: number; y: number } | null>(null);
 
-	const majorityIp = $derived.by((): string => {
+	const majorityRecord = $derived.by((): string => {
 		const counts = new Map<string, number>();
-		for (const r of propResults) for (const ip of r.ips) counts.set(ip, (counts.get(ip) ?? 0) + 1);
+		for (const r of propResults) for (const rec of r.records) counts.set(rec, (counts.get(rec) ?? 0) + 1);
 		let max = 0, best = '';
-		for (const [ip, n] of counts) if (n > max) { max = n; best = ip; }
+		for (const [rec, n] of counts) if (n > max) { max = n; best = rec; }
 		return best;
 	});
 
 	function propColor(r: PropResult): string {
-		if (r.status === 'ok') return r.ips.includes(majorityIp) ? 'var(--accent)' : '#f97316';
+		if (r.status === 'ok') return r.records.includes(majorityRecord) ? 'var(--accent)' : '#f97316';
 		if (r.status === 'nxdomain') return '#ef4444';
 		return '#3a3a3a';
+	}
+
+	function selectPropType(t: string) {
+		propType = t;
+		if (submitted) searchPropagation(submitted, t);
 	}
 
 	// ─── DNS helpers ─────────────────────────────────────────────────────────────
@@ -127,10 +135,10 @@
 		finally { rdapLoading = false; }
 	}
 
-	async function searchPropagation(domain: string) {
+	async function searchPropagation(domain: string, type = propType) {
 		propLoading = true;
 		try {
-			const res  = await fetch(`/api/propagation?domain=${encodeURIComponent(domain)}`);
+			const res  = await fetch(`/api/propagation?domain=${encodeURIComponent(domain)}&type=${encodeURIComponent(type)}`);
 			const data = await res.json();
 			if (!data.error) propResults = data.results;
 		} catch {}
@@ -147,7 +155,7 @@
 
 	function reset() {
 		submitted = ''; query = ''; dnsRecords = {}; rdapData = null; propResults = []; dnsError = ''; rdapError = '';
-		openNotices = new Set();
+		openNotices = new Set(); propType = 'A';
 	}
 
 	function handleKeydown(e: KeyboardEvent) { if (e.key === 'Enter') submit(); }
@@ -836,9 +844,20 @@
 						<span class="prop-title">PROPAGATION</span>
 						{#if !propLoading}
 							<span class="prop-meta">
-								A record · {propResults.filter(r => r.status === 'ok').length}/{propResults.length} resolvers responded
+								{propType} record · {propResults.filter(r => r.status === 'ok').length}/{propResults.length} resolvers responded
 							</span>
 						{/if}
+					</div>
+
+					<!-- Type selector -->
+					<div class="prop-type-bar">
+						{#each ALL_PROP_TYPES as t}
+							<button
+								class="prop-type-pill"
+								class:active={propType === t}
+								onclick={() => selectPropType(t)}
+							>{t}</button>
+						{/each}
 					</div>
 
 					{#if propLoading}
@@ -857,7 +876,6 @@
 								<path d={spherePath} class="sphere-bg"/>
 								<path d={gratPath}   class="graticule"/>
 								<path d={landPath}   class="land"/>
-								<path d={spherePath} class="sphere-border"/>
 								{#each propResults as r}
 									{@const pos = project(r.lon, r.lat)}
 									{#if pos}
@@ -882,8 +900,8 @@
 									<span class="fi fi-{tt.r.iso}"></span>
 									{tt.r.name} · {tt.r.city}
 								</span>
-								{#if tt.r.ips.length}
-									{#each tt.r.ips as ip}<span class="tt-ip">{ip}</span>{/each}
+								{#if tt.r.records.length}
+									{#each tt.r.records as rec}<span class="tt-ip">{rec}</span>{/each}
 									<span class="tt-meta">TTL {tt.r.ttl}s · {tt.r.ms}ms</span>
 								{:else}
 									<span class="tt-status">{tt.r.status} · {tt.r.ms}ms</span>
@@ -896,12 +914,12 @@
 							{#each propResults as r}
 								{@const col = propColor(r)}
 								<div class="resolver-row">
-									<span class="r-flag">{r.flag}</span>
+									<span class="r-flag"><span class="fi fi-{r.iso}"></span></span>
 									<span class="r-city">{r.city}</span>
 									<span class="r-name">{r.name}</span>
 									<span class="r-ips">
-										{#if r.ips.length}
-											{#each r.ips as ip}<span class="r-ip">{ip}</span>{/each}
+										{#if r.records.length}
+											{#each r.records as rec}<span class="r-ip">{rec}</span>{/each}
 										{:else}
 											<span class="r-noip">{r.status}</span>
 										{/if}
@@ -1566,6 +1584,26 @@
 	.graticule     { fill: none; stroke: #111; stroke-width: 0.4; }
 	.land          { fill: #141414; stroke: #252525; stroke-width: 0.5; }
 
+	.prop-type-bar {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin-bottom: 1rem;
+	}
+	.prop-type-pill {
+		padding: 0.18rem 0.55rem;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: transparent;
+		color: var(--text-muted);
+		font-family: var(--mono);
+		font-size: 0.68rem;
+		cursor: pointer;
+		transition: border-color 0.15s, color 0.15s, background 0.15s;
+	}
+	.prop-type-pill:hover { border-color: var(--border-hover); color: var(--text); }
+	.prop-type-pill.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+
 	.resolver-dot { transition: r 0.15s ease; cursor: default; }
 	.resolver-dot:hover { r: 7; }
 
@@ -1610,7 +1648,7 @@
 		font-size: 0.73rem;
 	}
 
-	.r-flag { font-size: 0.85rem; }
+	.r-flag .fi { width: 18px; height: 13px; border-radius: 2px; display: block; }
 
 	.r-city {
 		color: var(--text-muted);
