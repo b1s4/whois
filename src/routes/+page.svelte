@@ -5,62 +5,58 @@
 
 	type GroupKey = keyof typeof DNS_GROUPS | 'all';
 
-	let query = $state('');
-	let activeGroup = $state<GroupKey>('core');
-	let submittedDomain = $state('');
+	// ─── State ───────────────────────────────────────────────────────────────────
 
-	let dnsRecords = $state<Record<string, DnsTypeResult>>({});
-	let rdapData = $state<Record<string, unknown> | null>(null);
-	let dnsLoading = $state(false);
+	let query       = $state('');
+	let activeGroup = $state<GroupKey>('core');
+	let submitted   = $state('');
+
+	let dnsRecords  = $state<Record<string, DnsTypeResult>>({});
+	let rdapData    = $state<Record<string, unknown> | null>(null);
+	let dnsLoading  = $state(false);
 	let rdapLoading = $state(false);
-	let dnsError = $state('');
-	let rdapError = $state('');
+	let dnsError    = $state('');
+	let rdapError   = $state('');
+
+	// ─── DNS helpers ─────────────────────────────────────────────────────────────
 
 	const groups: { key: GroupKey; label: string }[] = [
-		{ key: 'core', label: 'Core' },
+		{ key: 'core',     label: 'Core'     },
 		{ key: 'security', label: 'Security' },
 		{ key: 'services', label: 'Services' },
 		{ key: 'advanced', label: 'Advanced' },
-		{ key: 'all', label: 'All' }
+		{ key: 'all',      label: 'All'      }
 	];
 
-	function getTypesForGroup(group: GroupKey): string[] {
-		if (group === 'all') return [...ALL_DNS_TYPES];
-		return [...DNS_GROUPS[group].types];
+	function getTypesForGroup(g: GroupKey): string[] {
+		if (g === 'all') return [...ALL_DNS_TYPES];
+		return [...DNS_GROUPS[g].types];
 	}
 
 	const filteredRecords = $derived(() => {
 		const types = getTypesForGroup(activeGroup);
-		return Object.fromEntries(
-			Object.entries(dnsRecords).filter(([t]) => types.includes(t))
-		);
+		return Object.fromEntries(Object.entries(dnsRecords).filter(([t]) => types.includes(t)));
 	});
 
 	const totalDnsFound = $derived(() =>
 		Object.values(dnsRecords).reduce((s, r) => s + (r as DnsTypeResult).answers.length, 0)
 	);
 
-	const typesWithResults = $derived(() =>
-		Object.entries(dnsRecords).filter(([, r]) => (r as DnsTypeResult).answers.length > 0)
-	);
-
 	function countForGroup(key: GroupKey): number {
-		const types = getTypesForGroup(key);
-		return Object.keys(dnsRecords).filter((t) => types.includes(t)).length;
+		return Object.keys(dnsRecords).filter((t) => getTypesForGroup(key).includes(t)).length;
 	}
+
+	// ─── Actions ─────────────────────────────────────────────────────────────────
 
 	async function submit() {
 		const raw = query.trim();
 		if (!raw || dnsLoading || rdapLoading) return;
-
 		const domain = raw.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-
-		submittedDomain = domain;
-		dnsRecords = {};
-		rdapData = null;
-		dnsError = '';
-		rdapError = '';
-
+		submitted   = domain;
+		dnsRecords  = {};
+		rdapData    = null;
+		dnsError    = '';
+		rdapError   = '';
 		searchDNS(domain);
 		searchRDAP(domain);
 	}
@@ -68,108 +64,201 @@
 	async function searchDNS(domain: string) {
 		dnsLoading = true;
 		try {
-			const types = [...ALL_DNS_TYPES].join(',');
-			const res = await fetch(`/api/dns?domain=${encodeURIComponent(domain)}&types=${types}`);
+			const res  = await fetch(`/api/dns?domain=${encodeURIComponent(domain)}&types=${[...ALL_DNS_TYPES].join(',')}`);
 			const data = await res.json();
 			if (data.error) dnsError = data.error;
 			else dnsRecords = data.records ?? {};
-		} catch {
-			dnsError = 'DNS query failed';
-		} finally {
-			dnsLoading = false;
-		}
+		} catch { dnsError = 'DNS query failed'; }
+		finally { dnsLoading = false; }
 	}
 
 	async function searchRDAP(domain: string) {
 		rdapLoading = true;
 		try {
-			const res = await fetch(`/api/rdap?domain=${encodeURIComponent(domain)}`);
+			const res  = await fetch(`/api/rdap?domain=${encodeURIComponent(domain)}`);
 			const data = await res.json();
 			if (data.error) rdapError = data.error;
 			else rdapData = data;
-		} catch {
-			rdapError = 'RDAP query failed';
-		} finally {
-			rdapLoading = false;
-		}
+		} catch { rdapError = 'RDAP query failed'; }
+		finally { rdapLoading = false; }
 	}
 
 	function reset() {
-		submittedDomain = '';
-		query = '';
-		dnsRecords = {};
-		rdapData = null;
-		dnsError = '';
-		rdapError = '';
+		submitted = ''; query = ''; dnsRecords = {}; rdapData = null; dnsError = ''; rdapError = '';
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') submit();
+	function handleKeydown(e: KeyboardEvent) { if (e.key === 'Enter') submit(); }
+
+	// ─── RDAP types ──────────────────────────────────────────────────────────────
+
+	interface VcardParsed {
+		name?:    string;
+		org?:     string;
+		emails?:  string[];
+		phones?:  string[];
+		fax?:     string[];
+		url?:     string;
+		address?: { street?: string; city?: string; state?: string; postal?: string; country?: string };
 	}
 
-	// ─── RDAP helpers ────────────────────────────────────────────────────────────
-
-	function getEvent(events: unknown[], action: string): string | undefined {
-		if (!Array.isArray(events)) return undefined;
-		const ev = events.find((e: unknown) => (e as { eventAction?: string }).eventAction === action);
-		return (ev as { eventDate?: string } | undefined)?.eventDate;
+	interface RdapEntity {
+		handle?:     string;
+		roles:       string[];
+		vcard:       VcardParsed;
+		publicIds?:  { type: string; identifier: string }[];
+		status?:     string[];
+		links?:      { rel?: string; href?: string; type?: string }[];
+		nested:      RdapEntity[];
 	}
+
+	interface DsRecord   { keyTag: number; algorithm: number; digestType: number; digest: string }
+	interface KeyRecord  { flags: number; protocol: number; algorithm: number; publicKey: string }
+
+	// ─── RDAP lookup tables ───────────────────────────────────────────────────────
+
+	const EVENT_LABELS: Record<string, string> = {
+		'registration':               'Registered',
+		'expiration':                 'Expires',
+		'last changed':               'Updated',
+		'last update of RDAP database': 'RDAP sync',
+		'transfer':                   'Transferred',
+		'deletion':                   'Deleted',
+		'reinstantiation':            'Reinstated',
+		'locked':                     'Locked',
+		'unlocked':                   'Unlocked',
+	};
+
+	const ROLE_ORDER = [
+		'registrar', 'registrant', 'administrative', 'technical',
+		'billing', 'abuse', 'noc', 'reseller', 'proxy', 'notifications', 'sponsor'
+	];
+
+	const ROLE_LABELS: Record<string, string> = {
+		registrar:      'Registrar',
+		registrant:     'Registrant',
+		administrative: 'Admin Contact',
+		technical:      'Technical Contact',
+		billing:        'Billing Contact',
+		abuse:          'Abuse Contact',
+		noc:            'NOC',
+		reseller:       'Reseller',
+		proxy:          'Privacy Proxy',
+		notifications:  'Notifications',
+		sponsor:        'Sponsor',
+	};
+
+	const ALGO_NAMES: Record<number, string> = {
+		1: 'RSA/MD5', 3: 'DSA/SHA-1', 5: 'RSA/SHA-1', 7: 'RSASHA1-NSEC3-SHA1',
+		8: 'RSA/SHA-256', 10: 'RSA/SHA-512', 13: 'ECDSA P-256/SHA-256',
+		14: 'ECDSA P-384/SHA-384', 15: 'Ed25519', 16: 'Ed448',
+	};
+
+	const DIGEST_NAMES: Record<number, string> = {
+		1: 'SHA-1', 2: 'SHA-256', 3: 'GOST R 34.11-94', 4: 'SHA-384',
+	};
+
+	// ─── RDAP parsers ─────────────────────────────────────────────────────────────
 
 	function fmtDate(iso?: string): string {
 		if (!iso) return '—';
-		return new Date(iso).toLocaleDateString('en-US', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric'
+		return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+	}
+
+	function fmtDateTime(iso?: string): string {
+		if (!iso) return '—';
+		return new Date(iso).toLocaleString('en-US', {
+			year: 'numeric', month: 'short', day: 'numeric',
+			hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
 		});
 	}
 
-	function getRegistrar(entities: unknown[]): Record<string, unknown> | null {
-		if (!Array.isArray(entities)) return null;
-		return (
-			(entities.find((e: unknown) => {
-				const ent = e as { roles?: string[] };
-				return ent.roles?.includes('registrar');
-			}) as Record<string, unknown>) ?? null
-		);
+	function parseVcard(vcardArray: unknown[]): VcardParsed {
+		const out: VcardParsed = {};
+		if (!Array.isArray(vcardArray?.[1])) return out;
+		for (const field of vcardArray[1] as unknown[]) {
+			if (!Array.isArray(field) || field.length < 4) continue;
+			const [name, params, , value] = field as [string, Record<string, unknown>, string, unknown];
+			switch (name) {
+				case 'fn':
+					out.name = String(value ?? '').trim(); break;
+				case 'org':
+					out.org = (Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')).trim(); break;
+				case 'email':
+					(out.emails ??= []).push(String(value ?? '').trim()); break;
+				case 'tel': {
+					const num = String(value ?? '').replace(/^tel:/, '').trim();
+					if (!num) break;
+					const t = (params?.type as string | undefined)?.toLowerCase();
+					if (t === 'fax') (out.fax ??= []).push(num);
+					else             (out.phones ??= []).push(num);
+					break;
+				}
+				case 'adr':
+					if (Array.isArray(value)) {
+						const [, , street, city, state, postal, country] = value as string[];
+						out.address = {
+							street:  String(street  ?? '').trim() || undefined,
+							city:    String(city    ?? '').trim() || undefined,
+							state:   String(state   ?? '').trim() || undefined,
+							postal:  String(postal  ?? '').trim() || undefined,
+							country: String(country ?? '').trim() || undefined,
+						};
+					}
+					break;
+				case 'url':
+					out.url = String(value ?? '').trim(); break;
+			}
+		}
+		return out;
 	}
 
-	function getVcardField(vcard: unknown[], key: string): string {
-		if (!Array.isArray(vcard?.[1])) return '';
-		const field = vcard[1].find((f: unknown) => Array.isArray(f) && f[0] === key);
-		if (!field || !Array.isArray(field)) return '';
-		const val = field[3];
-		return Array.isArray(val) ? val[0] : String(val ?? '');
+	function parseEntity(raw: unknown): RdapEntity {
+		const e = raw as Record<string, unknown>;
+		return {
+			handle:    e.handle ? String(e.handle) : undefined,
+			roles:     Array.isArray(e.roles) ? (e.roles as string[]) : [],
+			vcard:     parseVcard(e.vcardArray as unknown[] ?? []),
+			publicIds: Array.isArray(e.publicIds) ? (e.publicIds as { type: string; identifier: string }[]) : undefined,
+			status:    Array.isArray(e.status) ? (e.status as string[]) : undefined,
+			links:     Array.isArray(e.links) ? (e.links as { rel?: string; href?: string; type?: string }[]) : undefined,
+			nested:    Array.isArray(e.entities) ? (e.entities as unknown[]).map(parseEntity) : [],
+		};
 	}
 
-	function getRegistrarName(registrar: Record<string, unknown> | null): string {
-		if (!registrar) return '—';
-		const vcard = registrar.vcardArray as unknown[];
-		if (vcard) return getVcardField(vcard, 'fn') || String(registrar.handle ?? '—');
-		return String(registrar.handle ?? '—');
+	function flattenEntities(data: Record<string, unknown>): RdapEntity[] {
+		if (!Array.isArray(data.entities)) return [];
+		return (data.entities as unknown[]).map(parseEntity);
 	}
 
-	function getRegistrarIanaId(registrar: Record<string, unknown> | null): string {
-		if (!registrar) return '—';
-		const pubIds = registrar.publicIds as { type?: string; identifier?: string }[] | undefined;
-		if (!Array.isArray(pubIds)) return '—';
-		const iana = pubIds.find((p) => p.type === 'IANA Registrar ID');
-		return iana?.identifier ?? '—';
+	function sortEntities(entities: RdapEntity[]): RdapEntity[] {
+		return [...entities].sort((a, b) => {
+			const ai = ROLE_ORDER.indexOf(a.roles[0] ?? '');
+			const bi = ROLE_ORDER.indexOf(b.roles[0] ?? '');
+			return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+		});
 	}
 
-	function getNameservers(data: Record<string, unknown>): string[] {
-		const ns = data.nameservers as { ldhName?: string }[] | undefined;
-		if (!Array.isArray(ns)) return [];
-		return ns.map((n) => n.ldhName ?? '').filter(Boolean);
+	function vcardIsEmpty(v: VcardParsed): boolean {
+		return !v.name && !v.org && !v.emails?.length && !v.phones?.length
+			&& !v.fax?.length && !v.url && !v.address;
 	}
 
-	function getStatuses(data: Record<string, unknown>): string[] {
-		const s = data.status as string[] | undefined;
-		return Array.isArray(s) ? s : [];
+	function getNameserverIPs(ns: unknown): { v4: string[]; v6: string[] } {
+		const n = ns as Record<string, unknown>;
+		const ips = n.ipAddresses as { v4?: string[]; v6?: string[] } | undefined;
+		return { v4: ips?.v4 ?? [], v6: ips?.v6 ?? [] };
 	}
 
-	function isDnssecSigned(data: Record<string, unknown>): boolean {
-		return !!(data.secureDNS as { delegationSigned?: boolean } | undefined)?.delegationSigned;
+	function getDsData(data: Record<string, unknown>): DsRecord[] {
+		return (data.secureDNS as { dsData?: DsRecord[] } | undefined)?.dsData ?? [];
+	}
+
+	function getKeyData(data: Record<string, unknown>): KeyRecord[] {
+		return (data.secureDNS as { keyData?: KeyRecord[] } | undefined)?.keyData ?? [];
+	}
+
+	function truncate(s: string, n = 48): string {
+		return s.length > n ? s.slice(0, n) + '…' : s;
 	}
 </script>
 
@@ -178,9 +267,9 @@
 </svelte:head>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
-     PRE-SEARCH  —  full-page centered hero
+     PRE-SEARCH
 ════════════════════════════════════════════════════════════════════════════ -->
-{#if !submittedDomain}
+{#if !submitted}
 	<main class="hero-layout" transition:fade={{ duration: 150 }}>
 		<div class="hero-inner">
 			<header>
@@ -189,7 +278,6 @@
 				</div>
 				<p class="brand-sub">DNS records &amp; RDAP domain lookup</p>
 			</header>
-
 			<div class="hero-search">
 				<div class="search-wrap">
 					<span class="search-prefix">$</span>
@@ -214,12 +302,12 @@
 	</main>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
-     POST-SEARCH  —  sticky top bar + two-column results
+     POST-SEARCH
 ════════════════════════════════════════════════════════════════════════════ -->
 {:else}
 	<div class="results-layout" transition:fade={{ duration: 150 }}>
 
-		<!-- Sticky search bar -->
+		<!-- Sticky top bar -->
 		<div class="top-bar">
 			<div class="top-bar-inner">
 				<button class="top-brand" onclick={reset} title="New search">
@@ -249,10 +337,10 @@
 			</div>
 		</div>
 
-		<!-- Two-column results -->
+		<!-- Results -->
 		<div class="results-container">
 			<div class="domain-label">
-				<span class="domain-text">{submittedDomain}</span>
+				<span class="domain-text">{submitted}</span>
 				{#if dnsLoading || rdapLoading}
 					<span class="badge scanning">scanning</span>
 				{/if}
@@ -260,7 +348,7 @@
 
 			<div class="results-grid">
 
-				<!-- ──────────────── DNS COLUMN ──────────────── -->
+				<!-- ════════════════ DNS COLUMN ════════════════ -->
 				<section class="col dns-col">
 					<div class="col-header">
 						<span class="col-title">DNS</span>
@@ -269,7 +357,6 @@
 						{/if}
 					</div>
 
-					<!-- Group filter -->
 					<div class="group-filter">
 						{#each groups as g}
 							<button
@@ -280,40 +367,28 @@
 								{g.label}
 								{#if g.key !== 'all'}
 									{@const n = countForGroup(g.key)}
-									{#if n > 0}
-										<span class="group-count">{n}</span>
-									{/if}
+									{#if n > 0}<span class="group-count">{n}</span>{/if}
 								{/if}
 							</button>
 						{/each}
 					</div>
 
-					<!-- DNS content -->
 					{#if dnsLoading}
-						<div class="skeletons">
-							{#each { length: 5 } as _}
-								<div class="skeleton"></div>
-							{/each}
-						</div>
+						<div class="skeletons">{#each { length: 5 } as _}<div class="skeleton"></div>{/each}</div>
 					{:else if dnsError}
 						<div class="col-error">{dnsError}</div>
 					{:else if Object.keys(filteredRecords()).length === 0}
-						<div class="col-empty">
-							<span class="empty-glyph">◌</span>
-							No records in this group
-						</div>
+						<div class="col-empty"><span class="empty-glyph">◌</span>No records in this group</div>
 					{:else}
 						<div class="records-list">
 							{#each Object.entries(filteredRecords()) as [type, result]}
 								{@const info = DNS_TYPE_INFO[type]}
-								{@const res = result as DnsTypeResult}
+								{@const res  = result as DnsTypeResult}
 								<div class="record-block">
 									<div class="record-head">
 										<div class="record-type-row">
 											<span class="type-badge">{type}</span>
-											{#if info}
-												<span class="type-desc">{info.description}</span>
-											{/if}
+											{#if info}<span class="type-desc">{info.description}</span>{/if}
 										</div>
 										<span class="record-count-badge">{res.answers.length}</span>
 									</div>
@@ -331,7 +406,7 @@
 					{/if}
 				</section>
 
-				<!-- ──────────────── RDAP COLUMN ──────────────── -->
+				<!-- ════════════════ RDAP COLUMN ════════════════ -->
 				<section class="col rdap-col">
 					<div class="col-header">
 						<span class="col-title">RDAP</span>
@@ -341,106 +416,326 @@
 					</div>
 
 					{#if rdapLoading}
-						<div class="skeletons">
-							{#each { length: 6 } as _}
-								<div class="skeleton"></div>
-							{/each}
-						</div>
+						<div class="skeletons">{#each { length: 7 } as _}<div class="skeleton"></div>{/each}</div>
+
 					{:else if rdapError}
 						<div class="col-error">{rdapError}</div>
+
 					{:else if !rdapData}
-						<div class="col-empty">
-							<span class="empty-glyph">◌</span>
-							No RDAP data available
-						</div>
+						<div class="col-empty"><span class="empty-glyph">◌</span>No RDAP data available</div>
+
 					{:else}
-						{@const events = rdapData.events as unknown[]}
-						{@const registrar = getRegistrar(rdapData.entities as unknown[])}
-						{@const nameservers = getNameservers(rdapData)}
-						{@const statuses = getStatuses(rdapData)}
-						{@const dnssec = isDnssecSigned(rdapData)}
+						{@const d        = rdapData}
+						{@const events   = d.events   as {eventAction:string;eventDate:string}[] ?? []}
+						{@const nsArr    = d.nameservers as Record<string,unknown>[] ?? []}
+						{@const statuses = d.status   as string[] ?? []}
+						{@const secureDNS= d.secureDNS as Record<string,unknown> ?? {}}
+						{@const dsData   = getDsData(d)}
+						{@const keyData  = getKeyData(d)}
+						{@const entities = sortEntities(flattenEntities(d))}
+						{@const notices  = d.notices  as {title?:string;description?:string[];links?:{href?:string;rel?:string}[]}[] ?? []}
+						{@const links    = d.links    as {rel?:string;href?:string;type?:string}[] ?? []}
 
 						<div class="rdap-cards">
 
+							<!-- Domain identity -->
 							<div class="rdap-card">
 								<div class="rdap-card-title">Domain</div>
-								<div class="rdap-row">
-									<span class="rdap-label">Handle</span>
-									<span class="rdap-val mono">{rdapData.handle ?? '—'}</span>
-								</div>
-								<div class="rdap-row">
-									<span class="rdap-label">DNSSEC</span>
-									<span class="rdap-val" class:accent-text={dnssec}>
-										{dnssec ? 'Signed ✓' : 'Unsigned'}
-									</span>
-								</div>
-								<div class="rdap-row rdap-row-wrap">
-									<span class="rdap-label">Status</span>
-									<div class="status-tags">
-										{#each statuses as s}
-											<span class="status-tag">{s}</span>
-										{:else}
-											<span class="rdap-val">—</span>
-										{/each}
+								{#if d.ldhName}
+									<div class="rdap-row">
+										<span class="rdap-label">Name</span>
+										<span class="rdap-val mono">{String(d.ldhName)}</span>
 									</div>
-								</div>
-							</div>
-
-							<div class="rdap-card">
-								<div class="rdap-card-title">Timeline</div>
-								<div class="rdap-row">
-									<span class="rdap-label">Registered</span>
-									<span class="rdap-val mono">{fmtDate(getEvent(events, 'registration'))}</span>
-								</div>
-								<div class="rdap-row">
-									<span class="rdap-label">Expires</span>
-									<span class="rdap-val mono">{fmtDate(getEvent(events, 'expiration'))}</span>
-								</div>
-								<div class="rdap-row">
-									<span class="rdap-label">Updated</span>
-									<span class="rdap-val mono">{fmtDate(getEvent(events, 'last changed'))}</span>
-								</div>
-							</div>
-
-							<div class="rdap-card">
-								<div class="rdap-card-title">Registrar</div>
-								<div class="rdap-row">
-									<span class="rdap-label">Name</span>
-									<span class="rdap-val">{getRegistrarName(registrar)}</span>
-								</div>
-								<div class="rdap-row">
-									<span class="rdap-label">IANA ID</span>
-									<span class="rdap-val mono">{getRegistrarIanaId(registrar)}</span>
-								</div>
-							</div>
-
-							<div class="rdap-card">
-								<div class="rdap-card-title">Nameservers</div>
-								{#if nameservers.length === 0}
-									<span class="rdap-val">—</span>
-								{:else}
-									<div class="ns-list">
-										{#each nameservers as ns}
-											<div class="ns-row">
-												<span class="ns-arrow">›</span>
-												<span class="rdap-val mono">{ns}</span>
-											</div>
-										{/each}
+								{/if}
+								{#if d.unicodeName && d.unicodeName !== d.ldhName}
+									<div class="rdap-row">
+										<span class="rdap-label">Unicode</span>
+										<span class="rdap-val mono">{String(d.unicodeName)}</span>
+									</div>
+								{/if}
+								{#if d.handle}
+									<div class="rdap-row">
+										<span class="rdap-label">Handle</span>
+										<span class="rdap-val mono dim">{String(d.handle)}</span>
+									</div>
+								{/if}
+								{#if d.port43}
+									<div class="rdap-row">
+										<span class="rdap-label">WHOIS</span>
+										<span class="rdap-val mono dim">{String(d.port43)}</span>
+									</div>
+								{/if}
+								{#if statuses.length}
+									<div class="rdap-row rdap-row-wrap">
+										<span class="rdap-label">Status</span>
+										<div class="status-tags">
+											{#each statuses as s}<span class="status-tag">{s}</span>{/each}
+										</div>
 									</div>
 								{/if}
 							</div>
 
-						</div>
+							<!-- Timeline — all events -->
+							{#if events.length}
+								<div class="rdap-card">
+									<div class="rdap-card-title">Timeline</div>
+									{#each events as ev}
+										<div class="rdap-row">
+											<span class="rdap-label">{EVENT_LABELS[ev.eventAction] ?? ev.eventAction}</span>
+											<span class="rdap-val mono">
+												{ev.eventAction === 'last update of RDAP database'
+													? fmtDateTime(ev.eventDate)
+													: fmtDate(ev.eventDate)}
+											</span>
+										</div>
+									{/each}
+								</div>
+							{/if}
+
+							<!-- DNSSEC -->
+							<div class="rdap-card">
+								<div class="rdap-card-title">DNSSEC</div>
+								<div class="rdap-row">
+									<span class="rdap-label">Delegation</span>
+									<span class="rdap-val" class:accent-text={secureDNS.delegationSigned === true}>
+										{secureDNS.delegationSigned === true ? 'Signed ✓' : secureDNS.delegationSigned === false ? 'Unsigned' : '—'}
+									</span>
+								</div>
+								{#if secureDNS.zoneSigned !== undefined}
+									<div class="rdap-row">
+										<span class="rdap-label">Zone</span>
+										<span class="rdap-val" class:accent-text={secureDNS.zoneSigned === true}>
+											{secureDNS.zoneSigned ? 'Signed ✓' : 'Unsigned'}
+										</span>
+									</div>
+								{/if}
+								{#each dsData as ds, i}
+									<div class="rdap-separator">{i === 0 ? 'DS Record' : `DS Record ${i + 1}`}</div>
+									<div class="rdap-row">
+										<span class="rdap-label">Key Tag</span>
+										<span class="rdap-val mono">{ds.keyTag}</span>
+									</div>
+									<div class="rdap-row">
+										<span class="rdap-label">Algorithm</span>
+										<span class="rdap-val mono">{ds.algorithm}{ALGO_NAMES[ds.algorithm] ? ` — ${ALGO_NAMES[ds.algorithm]}` : ''}</span>
+									</div>
+									<div class="rdap-row">
+										<span class="rdap-label">Digest</span>
+										<span class="rdap-val mono">{DIGEST_NAMES[ds.digestType] ?? ds.digestType}</span>
+									</div>
+									<div class="rdap-row rdap-row-wrap">
+										<span class="rdap-label">Hash</span>
+										<span class="rdap-val mono small break">{ds.digest}</span>
+									</div>
+								{/each}
+								{#each keyData as kd, i}
+									<div class="rdap-separator">{i === 0 ? 'Key Record' : `Key Record ${i + 1}`}</div>
+									<div class="rdap-row">
+										<span class="rdap-label">Flags</span>
+										<span class="rdap-val mono">{kd.flags}</span>
+									</div>
+									<div class="rdap-row">
+										<span class="rdap-label">Protocol</span>
+										<span class="rdap-val mono">{kd.protocol}</span>
+									</div>
+									<div class="rdap-row">
+										<span class="rdap-label">Algorithm</span>
+										<span class="rdap-val mono">{kd.algorithm}{ALGO_NAMES[kd.algorithm] ? ` — ${ALGO_NAMES[kd.algorithm]}` : ''}</span>
+									</div>
+									<div class="rdap-row rdap-row-wrap">
+										<span class="rdap-label">Public Key</span>
+										<span class="rdap-val mono small break">{kd.publicKey}</span>
+									</div>
+								{/each}
+							</div>
+
+							<!-- Nameservers -->
+							{#if nsArr.length}
+								<div class="rdap-card">
+									<div class="rdap-card-title">Nameservers</div>
+									{#each nsArr as ns}
+										{@const ips = getNameserverIPs(ns)}
+										<div class="ns-entry">
+											<div class="ns-name">
+												<span class="ns-arrow">›</span>
+												<span class="rdap-val mono">{String((ns as Record<string,unknown>).ldhName ?? '')}</span>
+											</div>
+											{#if ips.v4.length || ips.v6.length}
+												<div class="ns-ips">
+													{#each ips.v4 as ip}<span class="ip-tag v4">{ip}</span>{/each}
+													{#each ips.v6 as ip}<span class="ip-tag v6">{ip}</span>{/each}
+												</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{/if}
+
+							<!-- Entities (registrar, contacts…) -->
+							{#each entities as entity}
+								{@const vcard = entity.vcard}
+								{@const primaryRole = entity.roles[0] ?? 'other'}
+								{@const roleLabel = ROLE_LABELS[primaryRole] ?? primaryRole}
+								{@const hasData = !vcardIsEmpty(vcard) || entity.handle || entity.publicIds?.length}
+
+								{#if hasData}
+									<div class="rdap-card">
+										<div class="rdap-card-title">
+											{roleLabel}
+											{#if entity.roles.length > 1}
+												<span class="role-extra">+{entity.roles.slice(1).map(r => ROLE_LABELS[r] ?? r).join(', ')}</span>
+											{/if}
+										</div>
+
+										{#if entity.handle}
+											<div class="rdap-row">
+												<span class="rdap-label">Handle</span>
+												<span class="rdap-val mono dim">{entity.handle}</span>
+											</div>
+										{/if}
+
+										{#if entity.publicIds?.length}
+											{#each entity.publicIds as pid}
+												<div class="rdap-row">
+													<span class="rdap-label">{pid.type.replace('IANA ', '')}</span>
+													<span class="rdap-val mono">{pid.identifier}</span>
+												</div>
+											{/each}
+										{/if}
+
+										{#if vcard.name}
+											<div class="rdap-row">
+												<span class="rdap-label">Name</span>
+												<span class="rdap-val">{vcard.name}</span>
+											</div>
+										{/if}
+
+										{#if vcard.org && vcard.org !== vcard.name}
+											<div class="rdap-row">
+												<span class="rdap-label">Org</span>
+												<span class="rdap-val">{vcard.org}</span>
+											</div>
+										{/if}
+
+										{#if vcard.emails?.length}
+											{#each vcard.emails as email}
+												<div class="rdap-row">
+													<span class="rdap-label">Email</span>
+													<span class="rdap-val mono">{email}</span>
+												</div>
+											{/each}
+										{/if}
+
+										{#if vcard.phones?.length}
+											{#each vcard.phones as phone}
+												<div class="rdap-row">
+													<span class="rdap-label">Phone</span>
+													<span class="rdap-val mono">{phone}</span>
+												</div>
+											{/each}
+										{/if}
+
+										{#if vcard.fax?.length}
+											{#each vcard.fax as fax}
+												<div class="rdap-row">
+													<span class="rdap-label">Fax</span>
+													<span class="rdap-val mono">{fax}</span>
+												</div>
+											{/each}
+										{/if}
+
+										{#if vcard.url}
+											<div class="rdap-row">
+												<span class="rdap-label">URL</span>
+												<span class="rdap-val mono small">{vcard.url}</span>
+											</div>
+										{/if}
+
+										{#if vcard.address}
+											{@const a = vcard.address}
+											<div class="rdap-row rdap-row-wrap">
+												<span class="rdap-label">Address</span>
+												<div class="address-block">
+													{#if a.street}  <span>{a.street}</span>   {/if}
+													{#if a.city || a.state || a.postal}
+														<span>
+															{[a.city, a.state, a.postal].filter(Boolean).join(', ')}
+														</span>
+													{/if}
+													{#if a.country}<span>{a.country}</span>{/if}
+												</div>
+											</div>
+										{/if}
+
+										{#if entity.status?.length}
+											<div class="rdap-row rdap-row-wrap">
+												<span class="rdap-label">Status</span>
+												<div class="status-tags">
+													{#each entity.status as s}<span class="status-tag">{s}</span>{/each}
+												</div>
+											</div>
+										{/if}
+
+										<!-- Nested entities (e.g. abuse contact inside registrar) -->
+										{#each entity.nested as nested}
+											{@const nvc = nested.vcard}
+											{@const nRole = nested.roles[0] ?? 'other'}
+											{#if !vcardIsEmpty(nvc)}
+												<div class="rdap-separator">{ROLE_LABELS[nRole] ?? nRole}</div>
+												{#if nvc.name}<div class="rdap-row"><span class="rdap-label">Name</span><span class="rdap-val">{nvc.name}</span></div>{/if}
+												{#if nvc.emails?.length}{#each nvc.emails as e}<div class="rdap-row"><span class="rdap-label">Email</span><span class="rdap-val mono">{e}</span></div>{/each}{/if}
+												{#if nvc.phones?.length}{#each nvc.phones as p}<div class="rdap-row"><span class="rdap-label">Phone</span><span class="rdap-val mono">{p}</span></div>{/each}{/if}
+												{#if nvc.fax?.length}{#each nvc.fax as f}<div class="rdap-row"><span class="rdap-label">Fax</span><span class="rdap-val mono">{f}</span></div>{/each}{/if}
+											{/if}
+										{/each}
+
+									</div>
+								{/if}
+							{/each}
+
+							<!-- Links -->
+							{#if links.filter(l => l.rel !== 'self').length}
+								<div class="rdap-card">
+									<div class="rdap-card-title">Links</div>
+									{#each links as link}
+										{#if link.href && link.rel !== 'self'}
+											<div class="rdap-row">
+												<span class="rdap-label">{link.rel ?? 'link'}</span>
+												<span class="rdap-val mono small break">{link.href}</span>
+											</div>
+										{/if}
+									{/each}
+								</div>
+							{/if}
+
+							<!-- Notices -->
+							{#if notices.length}
+								<div class="rdap-card">
+									<div class="rdap-card-title">Notices</div>
+									{#each notices as notice}
+										<div class="notice-block">
+											{#if notice.title}
+												<div class="notice-title">{notice.title}</div>
+											{/if}
+											{#if notice.description?.length}
+												<div class="notice-desc">{notice.description[0]}</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{/if}
+
+						</div><!-- /rdap-cards -->
 					{/if}
 				</section>
 
-			</div>
-		</div>
-	</div>
+			</div><!-- /results-grid -->
+		</div><!-- /results-container -->
+	</div><!-- /results-layout -->
 {/if}
 
 <style>
-	/* ─── Shared tokens ─────────────────────────────────────────────────────── */
+	/* ─── Shared search tokens ──────────────────────────────────────────────── */
 
 	.search-prefix {
 		font-family: var(--mono);
@@ -464,9 +759,7 @@
 		min-width: 0;
 	}
 
-	.search-input::placeholder {
-		color: var(--text-dim);
-	}
+	.search-input::placeholder { color: var(--text-dim); }
 
 	.search-btn {
 		flex-shrink: 0;
@@ -488,29 +781,20 @@
 		gap: 0.4rem;
 	}
 
-	.search-btn:disabled {
-		opacity: 0.35;
-		cursor: not-allowed;
-	}
-
-	.search-btn:not(:disabled):hover {
-		opacity: 0.82;
-	}
+	.search-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+	.search-btn:not(:disabled):hover { opacity: 0.82; }
 
 	.spinner {
-		width: 13px;
-		height: 13px;
-		border: 2px solid rgba(0, 0, 0, 0.25);
+		width: 13px; height: 13px;
+		border: 2px solid rgba(0,0,0,0.25);
 		border-top-color: #000;
 		border-radius: 50%;
 		animation: spin 0.55s linear infinite;
 	}
 
-	@keyframes spin {
-		to { transform: rotate(360deg); }
-	}
+	@keyframes spin { to { transform: rotate(360deg); } }
 
-	/* ─── PRE-SEARCH HERO ───────────────────────────────────────────────────── */
+	/* ─── Hero layout ───────────────────────────────────────────────────────── */
 
 	.hero-layout {
 		min-height: 100dvh;
@@ -528,23 +812,15 @@
 		gap: 2.5rem;
 	}
 
-	header {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
-	}
+	header { display: flex; flex-direction: column; gap: 0.4rem; }
 
-	.brand {
-		display: flex;
-		align-items: baseline;
-	}
+	.brand { display: flex; align-items: baseline; }
 
 	.brand-name {
 		font-family: var(--mono);
 		font-size: 2.25rem;
 		font-weight: 600;
 		letter-spacing: -0.02em;
-		color: var(--text);
 	}
 
 	.brand-cursor {
@@ -555,10 +831,7 @@
 		animation: blink 1.1s step-end infinite;
 	}
 
-	@keyframes blink {
-		0%, 100% { opacity: 1; }
-		50%       { opacity: 0; }
-	}
+	@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
 	.brand-sub {
 		font-size: 0.78rem;
@@ -567,11 +840,7 @@
 		text-transform: uppercase;
 	}
 
-	.hero-search {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-	}
+	.hero-search { display: flex; flex-direction: column; gap: 0.75rem; }
 
 	.search-wrap {
 		display: flex;
@@ -583,17 +852,11 @@
 		transition: border-color 0.15s;
 	}
 
-	.search-wrap:focus-within {
-		border-color: var(--accent);
-	}
+	.search-wrap:focus-within { border-color: var(--accent); }
 
-	.hero-hint {
-		font-size: 0.72rem;
-		color: var(--text-muted);
-		padding-left: 0.25rem;
-	}
+	.hero-hint { font-size: 0.72rem; color: var(--text-muted); padding-left: 0.25rem; }
 
-	/* ─── POST-SEARCH LAYOUT ────────────────────────────────────────────────── */
+	/* ─── Results layout ────────────────────────────────────────────────────── */
 
 	.results-layout {
 		min-height: 100dvh;
@@ -601,13 +864,11 @@
 		flex-direction: column;
 	}
 
-	/* ─── Sticky top bar ───────────────────────────────────────────────────── */
-
 	.top-bar {
 		position: sticky;
 		top: 0;
 		z-index: 50;
-		background: rgba(0, 0, 0, 0.92);
+		background: rgba(0,0,0,0.92);
 		backdrop-filter: blur(12px);
 		-webkit-backdrop-filter: blur(12px);
 		border-bottom: 1px solid var(--border);
@@ -635,7 +896,6 @@
 		font-size: 1rem;
 		font-weight: 600;
 		color: var(--accent);
-		letter-spacing: -0.02em;
 	}
 
 	.top-search-wrap {
@@ -649,22 +909,9 @@
 		transition: border-color 0.15s;
 	}
 
-	.top-search-wrap:focus-within {
-		border-color: var(--accent);
-	}
-
-	.top-search-wrap .search-input {
-		padding: 0.6rem 0;
-		font-size: 0.9rem;
-	}
-
-	.top-search-wrap .search-btn {
-		min-height: 2.625rem;
-		font-size: 0.72rem;
-		padding: 0 1.2rem;
-	}
-
-	/* ─── Results container ────────────────────────────────────────────────── */
+	.top-search-wrap:focus-within { border-color: var(--accent); }
+	.top-search-wrap .search-input { padding: 0.6rem 0; font-size: 0.9rem; }
+	.top-search-wrap .search-btn { min-height: 2.625rem; font-size: 0.72rem; padding: 0 1.2rem; }
 
 	.results-container {
 		flex: 1;
@@ -681,27 +928,10 @@
 		margin-bottom: 1.25rem;
 	}
 
-	.domain-text {
-		font-family: var(--mono);
-		font-size: 0.9rem;
-		font-weight: 600;
-		color: var(--text-muted);
-	}
+	.domain-text { font-family: var(--mono); font-size: 0.9rem; font-weight: 600; color: var(--text-muted); }
 
-	.badge {
-		font-family: var(--mono);
-		font-size: 0.68rem;
-		padding: 0.15rem 0.5rem;
-		border-radius: 3px;
-	}
-
-	.badge.scanning {
-		background: var(--accent-dim);
-		color: var(--accent);
-		border: 1px solid rgba(254, 229, 0, 0.2);
-	}
-
-	/* ─── Two-column grid ──────────────────────────────────────────────────── */
+	.badge { font-family: var(--mono); font-size: 0.68rem; padding: 0.15rem 0.5rem; border-radius: 3px; }
+	.badge.scanning { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(254,229,0,0.2); }
 
 	.results-grid {
 		display: grid;
@@ -710,14 +940,9 @@
 		align-items: start;
 	}
 
-	/* ─── Column shared ────────────────────────────────────────────────────── */
+	/* ─── Column shared ─────────────────────────────────────────────────────── */
 
-	.col {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		min-width: 0;
-	}
+	.col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
 
 	.col-header {
 		display: flex;
@@ -736,71 +961,32 @@
 		color: var(--accent);
 	}
 
-	.col-meta {
-		font-size: 0.72rem;
-		color: var(--text-muted);
-		font-family: var(--mono);
-	}
+	.col-meta { font-size: 0.72rem; color: var(--text-muted); font-family: var(--mono); }
+	.col-error { font-size: 0.82rem; color: var(--error); font-family: var(--mono); }
+	.col-empty { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 2.5rem 0; color: var(--text-muted); font-size: 0.82rem; }
+	.empty-glyph { font-size: 1.5rem; opacity: 0.25; }
 
-	.col-error {
-		font-size: 0.82rem;
-		color: var(--error);
-		padding: 0.5rem 0;
-		font-family: var(--mono);
-	}
+	/* ─── Skeleton ──────────────────────────────────────────────────────────── */
 
-	.col-empty {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.6rem;
-		padding: 2.5rem 0;
-		color: var(--text-muted);
-		font-size: 0.82rem;
-	}
-
-	.empty-glyph {
-		font-size: 1.5rem;
-		opacity: 0.25;
-	}
-
-	/* ─── Skeleton loader ──────────────────────────────────────────────────── */
-
-	.skeletons {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
+	.skeletons { display: flex; flex-direction: column; gap: 0.5rem; }
 
 	.skeleton {
 		height: 52px;
 		border-radius: 5px;
-		background: linear-gradient(
-			90deg,
-			var(--surface) 25%,
-			var(--surface-2) 50%,
-			var(--surface) 75%
-		);
+		background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
 		background-size: 200% 100%;
 		animation: shimmer 1.4s infinite;
 	}
 
-	.skeleton:nth-child(2) { animation-delay: 0.1s; }
-	.skeleton:nth-child(3) { animation-delay: 0.2s; }
-	.skeleton:nth-child(4) { animation-delay: 0.3s; }
+	.skeleton:nth-child(2) { animation-delay: 0.1s; height: 44px; }
+	.skeleton:nth-child(3) { animation-delay: 0.2s; height: 60px; }
+	.skeleton:nth-child(4) { animation-delay: 0.3s; height: 44px; }
 
-	@keyframes shimmer {
-		0%   { background-position: 200% 0; }
-		100% { background-position: -200% 0; }
-	}
+	@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-	/* ─── Group filter ─────────────────────────────────────────────────────── */
+	/* ─── Group filter ──────────────────────────────────────────────────────── */
 
-	.group-filter {
-		display: flex;
-		gap: 0.3rem;
-		flex-wrap: wrap;
-	}
+	.group-filter { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 
 	.group-btn {
 		background: var(--surface);
@@ -820,29 +1006,13 @@
 		transition: all 0.12s;
 	}
 
-	.group-btn:hover {
-		border-color: var(--border-hover);
-		color: var(--text);
-	}
+	.group-btn:hover { border-color: var(--border-hover); color: var(--text); }
+	.group-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+	.group-count { opacity: 0.65; font-size: 0.62rem; }
 
-	.group-btn.active {
-		background: var(--accent);
-		border-color: var(--accent);
-		color: var(--accent-text);
-	}
+	/* ─── DNS records ───────────────────────────────────────────────────────── */
 
-	.group-count {
-		opacity: 0.65;
-		font-size: 0.62rem;
-	}
-
-	/* ─── DNS record blocks ────────────────────────────────────────────────── */
-
-	.records-list {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
+	.records-list { display: flex; flex-direction: column; gap: 0.5rem; }
 
 	.record-block {
 		background: var(--surface);
@@ -852,9 +1022,7 @@
 		transition: border-color 0.12s;
 	}
 
-	.record-block:hover {
-		border-color: var(--border-hover);
-	}
+	.record-block:hover { border-color: var(--border-hover); }
 
 	.record-head {
 		display: flex;
@@ -865,11 +1033,7 @@
 		border-bottom: 1px solid var(--border);
 	}
 
-	.record-type-row {
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-	}
+	.record-type-row { display: flex; align-items: center; gap: 0.6rem; }
 
 	.type-badge {
 		font-family: var(--mono);
@@ -880,10 +1044,7 @@
 		min-width: 4rem;
 	}
 
-	.type-desc {
-		font-size: 0.7rem;
-		color: var(--text-muted);
-	}
+	.type-desc { font-size: 0.7rem; color: var(--text-muted); }
 
 	.record-count-badge {
 		font-family: var(--mono);
@@ -894,10 +1055,7 @@
 		border-radius: 2px;
 	}
 
-	.record-entries {
-		display: flex;
-		flex-direction: column;
-	}
+	.record-entries { display: flex; flex-direction: column; }
 
 	.record-entry {
 		display: flex;
@@ -908,32 +1066,13 @@
 		border-bottom: 1px solid var(--border);
 	}
 
-	.record-entry:last-child {
-		border-bottom: none;
-	}
+	.record-entry:last-child { border-bottom: none; }
+	.record-data { font-family: var(--mono); font-size: 0.78rem; word-break: break-all; flex: 1; }
+	.record-ttl { font-family: var(--mono); font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0; }
 
-	.record-data {
-		font-family: var(--mono);
-		font-size: 0.78rem;
-		color: var(--text);
-		word-break: break-all;
-		flex: 1;
-	}
+	/* ─── RDAP cards ────────────────────────────────────────────────────────── */
 
-	.record-ttl {
-		font-family: var(--mono);
-		font-size: 0.68rem;
-		color: var(--text-muted);
-		flex-shrink: 0;
-	}
-
-	/* ─── RDAP cards ───────────────────────────────────────────────────────── */
-
-	.rdap-cards {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
+	.rdap-cards { display: flex; flex-direction: column; gap: 0.5rem; }
 
 	.rdap-card {
 		background: var(--surface);
@@ -942,7 +1081,7 @@
 		padding: 0.875rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.55rem;
+		gap: 0.5rem;
 	}
 
 	.rdap-card-title {
@@ -954,20 +1093,24 @@
 		color: var(--text-muted);
 		padding-bottom: 0.45rem;
 		border-bottom: 1px solid var(--border);
-	}
-
-	.rdap-row {
 		display: flex;
-		align-items: baseline;
+		align-items: center;
 		gap: 0.5rem;
 	}
 
-	.rdap-row-wrap {
-		align-items: flex-start;
+	.role-extra {
+		font-size: 0.58rem;
+		color: var(--text-dim);
+		text-transform: none;
+		letter-spacing: 0;
+		font-weight: 400;
 	}
 
+	.rdap-row { display: flex; align-items: baseline; gap: 0.5rem; }
+	.rdap-row-wrap { align-items: flex-start; flex-wrap: wrap; }
+
 	.rdap-label {
-		font-size: 0.68rem;
+		font-size: 0.67rem;
 		font-family: var(--mono);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
@@ -976,25 +1119,26 @@
 		flex-shrink: 0;
 	}
 
-	.rdap-val {
-		font-size: 0.82rem;
-		color: var(--text);
-	}
+	.rdap-val { font-size: 0.82rem; color: var(--text); }
+	.rdap-val.mono { font-family: var(--mono); font-size: 0.78rem; }
+	.rdap-val.dim { color: var(--text-muted); }
+	.rdap-val.small { font-size: 0.72rem; }
+	.rdap-val.break { word-break: break-all; overflow-wrap: anywhere; }
+	.rdap-val.accent-text { color: var(--accent); }
 
-	.rdap-val.mono {
+	.rdap-separator {
 		font-family: var(--mono);
-		font-size: 0.78rem;
-	}
-
-	.rdap-val.accent-text {
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
 		color: var(--accent);
+		opacity: 0.7;
+		margin-top: 0.25rem;
+		padding-top: 0.5rem;
+		border-top: 1px dashed var(--border);
 	}
 
-	.status-tags {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem;
-	}
+	.status-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 
 	.status-tag {
 		font-family: var(--mono);
@@ -1006,56 +1150,56 @@
 		color: var(--text-muted);
 	}
 
-	.ns-list {
+	/* ─── Nameservers ───────────────────────────────────────────────────────── */
+
+	.ns-entry { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.1rem 0; }
+
+	.ns-name { display: flex; align-items: center; gap: 0.4rem; }
+
+	.ns-arrow { color: var(--accent); font-size: 0.75rem; font-weight: 700; }
+
+	.ns-ips { display: flex; flex-wrap: wrap; gap: 0.25rem; padding-left: 1rem; }
+
+	.ip-tag {
+		font-family: var(--mono);
+		font-size: 0.65rem;
+		padding: 0.1rem 0.35rem;
+		border-radius: 2px;
+		border: 1px solid var(--border);
+	}
+
+	.ip-tag.v4 { color: var(--accent); background: var(--accent-dim); border-color: rgba(254,229,0,0.15); }
+	.ip-tag.v6 { color: #7eb8ff; background: rgba(126,184,255,0.07); border-color: rgba(126,184,255,0.15); }
+
+	/* ─── Address ───────────────────────────────────────────────────────────── */
+
+	.address-block {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		gap: 0.1rem;
+		font-size: 0.8rem;
+		color: var(--text);
 	}
 
-	.ns-row {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-	}
+	/* ─── Notices ───────────────────────────────────────────────────────────── */
 
-	.ns-arrow {
-		color: var(--accent);
-		font-size: 0.75rem;
-		font-weight: 700;
-	}
+	.notice-block { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+	.notice-block:last-child { border-bottom: none; padding-bottom: 0; }
+	.notice-title { font-size: 0.72rem; font-weight: 500; color: var(--text); }
+	.notice-desc { font-size: 0.7rem; color: var(--text-muted); line-height: 1.5; }
 
-	/* ─── Responsive ───────────────────────────────────────────────────────── */
+	/* ─── Responsive ────────────────────────────────────────────────────────── */
 
 	@media (max-width: 840px) {
-		.results-grid {
-			grid-template-columns: 1fr;
-		}
-
-		.type-desc {
-			display: none;
-		}
+		.results-grid { grid-template-columns: 1fr; }
+		.type-desc { display: none; }
 	}
 
 	@media (max-width: 520px) {
-		.hero-layout {
-			padding: 2rem 1rem;
-		}
-
-		.brand-name,
-		.brand-cursor {
-			font-size: 1.75rem;
-		}
-
-		.search-btn {
-			padding: 0 1rem;
-		}
-
-		.results-container {
-			padding: 1rem 1rem 4rem;
-		}
-
-		.top-bar-inner {
-			padding: 0.5rem 1rem;
-		}
+		.hero-layout { padding: 2rem 1rem; }
+		.brand-name, .brand-cursor { font-size: 1.75rem; }
+		.search-btn { padding: 0 1rem; }
+		.results-container { padding: 1rem 1rem 4rem; }
+		.top-bar-inner { padding: 0.5rem 1rem; }
 	}
 </style>
