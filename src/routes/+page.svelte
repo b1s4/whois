@@ -5,6 +5,7 @@
 	import { geoNaturalEarth1, geoPath, geoGraticule10 } from 'd3-geo';
 	import { feature } from 'topojson-client';
 	import worldJson from 'world-atlas/countries-110m.json';
+	import 'flag-icons/css/flag-icons.min.css';
 
 	// ─── World map (computed once, module-level) ─────────────────────────────────
 	const MAP_W = 960, MAP_H = 500;
@@ -36,13 +37,14 @@
 	let rdapError   = $state('');
 
 	interface PropResult {
-		id: string; name: string; city: string; flag: string;
+		id: string; name: string; city: string; flag: string; iso: string;
 		lat: number; lon: number;
 		ips: string[]; ttl: number | null;
 		status: 'ok' | 'nxdomain' | 'error' | 'timeout'; ms: number;
 	}
 	let propResults  = $state<PropResult[]>([]);
 	let propLoading  = $state(false);
+	let mapTooltip   = $state<{ r: PropResult; x: number; y: number } | null>(null);
 
 	const majorityIp = $derived.by((): string => {
 		const counts = new Map<string, number>();
@@ -864,13 +866,30 @@
 											cx={pos[0]} cy={pos[1]} r="5"
 											fill={propColor(r)}
 											stroke="var(--bg)" stroke-width="1.5"
-										>
-											<title>{r.flag} {r.city} — {r.name}: {r.ips.join(', ') || r.status}</title>
-										</circle>
+											onmouseenter={(e) => { mapTooltip = { r, x: e.clientX, y: e.clientY }; }}
+											onmousemove={(e) => { mapTooltip = { r, x: e.clientX, y: e.clientY }; }}
+											onmouseleave={() => { mapTooltip = null; }}
+										/>
 									{/if}
 								{/each}
 							</svg>
 						</div>
+
+						{#if mapTooltip}
+							{@const tt = mapTooltip}
+							<div class="map-tooltip" style="left:{tt.x}px;top:{tt.y}px">
+								<span class="tt-header">
+									<span class="fi fi-{tt.r.iso}"></span>
+									{tt.r.name} · {tt.r.city}
+								</span>
+								{#if tt.r.ips.length}
+									{#each tt.r.ips as ip}<span class="tt-ip">{ip}</span>{/each}
+									<span class="tt-meta">TTL {tt.r.ttl}s · {tt.r.ms}ms</span>
+								{:else}
+									<span class="tt-status">{tt.r.status} · {tt.r.ms}ms</span>
+								{/if}
+							</div>
+						{/if}
 
 						<!-- Resolver rows -->
 						<div class="resolver-list">
@@ -1547,8 +1566,31 @@
 	.graticule     { fill: none; stroke: #111; stroke-width: 0.4; }
 	.land          { fill: #141414; stroke: #252525; stroke-width: 0.5; }
 
-	.resolver-dot { transition: r 0.15s ease; }
+	.resolver-dot { transition: r 0.15s ease; cursor: default; }
 	.resolver-dot:hover { r: 7; }
+
+	.map-tooltip {
+		position: fixed;
+		pointer-events: none;
+		z-index: 200;
+		transform: translate(14px, -50%);
+		background: #161616;
+		border: 1px solid #2a2a2a;
+		border-radius: 6px;
+		padding: 0.45rem 0.65rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.18rem;
+		font-family: var(--mono);
+		font-size: 0.7rem;
+		white-space: nowrap;
+		box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+	}
+	.tt-header { display: flex; align-items: center; gap: 0.45rem; color: var(--text); font-weight: 600; margin-bottom: 0.1rem; }
+	.tt-header .fi { width: 18px; height: 13px; border-radius: 2px; flex-shrink: 0; }
+	.tt-ip     { color: var(--accent); }
+	.tt-meta   { color: var(--text-muted); margin-top: 0.1rem; }
+	.tt-status { color: #ef4444; }
 
 	/* Resolver list */
 	.resolver-list {
