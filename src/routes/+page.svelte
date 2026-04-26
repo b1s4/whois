@@ -1520,12 +1520,70 @@
 		.type-desc { display: none; }
 	}
 
+	/* ── Tablet / large phone ──────────────────────────────────────────────── */
+	@media (max-width: 640px) {
+		.top-bar-inner { padding: 0.45rem 1rem; }
+		.results-container { padding: 1rem 1rem 4rem; }
+		.prop-type-pill { padding: 0.3rem 0.65rem; font-size: 0.7rem; }
+		.prop-type-bar { gap: 0.35rem; }
+	}
+
+	/* ── Resolver rows: fix grid on mobile ─────────────────────────────────── */
+	@media (max-width: 600px) {
+		.resolver-row {
+			grid-template-columns: 1.4rem 1fr auto 1rem;
+			grid-template-rows: auto auto;
+			row-gap: 0.3rem;
+		}
+		.r-flag { grid-column: 1; grid-row: 1; }
+		.r-city { grid-column: 2; grid-row: 1; }
+		.r-name { display: none; }
+		.r-ips  { grid-column: 1 / -1; grid-row: 2; }
+		.r-ttl  { display: none; }
+		.r-ms   { grid-column: 3; grid-row: 1; }
+		.r-dot  { grid-column: 4; grid-row: 1; }
+
+		/* Larger dots — 5 SVG units ≈ 2px on a 375px screen, needs to be tappable */
+		.resolver-dot { r: 8; }
+		.resolver-dot:hover { r: 8; }
+		.resolver-dot.highlighted { r: 11; }
+	}
+
+	/* ── Small phone ───────────────────────────────────────────────────────── */
 	@media (max-width: 520px) {
 		.hero-layout { padding: 2rem 1rem; }
 		.brand-name, .brand-cursor { font-size: 1.75rem; }
 		.search-btn { padding: 0 1rem; }
-		.results-container { padding: 1rem 1rem 4rem; }
-		.top-bar-inner { padding: 0.5rem 1rem; }
+		.results-container { padding: 1rem 0.875rem 4rem; }
+		.top-bar-inner { padding: 0.4rem 0.875rem; gap: 0.5rem; }
+		.top-search-wrap .search-btn { padding: 0 0.875rem; }
+
+		/* Tighter record entries */
+		.record-entry { padding: 0.4rem 0.6rem; }
+		.record-head  { padding: 0.4rem 0.6rem; }
+	}
+
+	/* ── Tiny phone (≤400px) ───────────────────────────────────────────────── */
+	@media (max-width: 400px) {
+		.hero-layout { padding: 1.5rem 0.875rem; }
+		.brand-name, .brand-cursor { font-size: 1.5rem; }
+		.results-container { padding: 0.875rem 0.75rem 3.5rem; }
+		.top-bar-inner { padding: 0.375rem 0.75rem; gap: 0.375rem; }
+		.top-brand-text { font-size: 0.85rem; }
+
+		/* Stack RDAP label + value vertically to avoid cramping */
+		.rdap-row { flex-direction: column; gap: 0.1rem; }
+		.rdap-label { min-width: auto; }
+
+		/* Smaller map dots on very small screens (fewer px to spare) */
+		.resolver-dot { r: 6; }
+		.resolver-dot.highlighted { r: 9; }
+
+		/* Shrink map height slightly */
+		.map-wrap { margin-bottom: 0.875rem; }
+
+		/* Compact prop header */
+		.prop-section { margin-top: 1.75rem; padding-top: 1.25rem; }
 	}
 
 	/* ─── Propagation ────────────────────────────────────────────────────────── */
@@ -1686,6 +1744,8 @@
 		padding: 0.1rem 0.35rem;
 		border-radius: 3px;
 		font-size: 0.7rem;
+		word-break: break-all;
+		overflow-wrap: anywhere;
 	}
 
 	.r-noip {
