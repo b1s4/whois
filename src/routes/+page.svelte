@@ -47,6 +47,7 @@
 	let propResults  = $state<PropResult[]>([]);
 	let propLoading  = $state(false);
 	let propType     = $state('A');
+	let hoveredId    = $state<string | null>(null);
 	let mapTooltip   = $state<{ r: PropResult; x: number; y: number } | null>(null);
 
 	const majorityRecord = $derived.by((): string => {
@@ -881,12 +882,13 @@
 									{#if pos}
 										<circle
 											class="resolver-dot"
+											class:highlighted={hoveredId === r.id}
 											cx={pos[0]} cy={pos[1]} r="5"
 											fill={propColor(r)}
 											stroke="var(--bg)" stroke-width="1.5"
-											onmouseenter={(e) => { mapTooltip = { r, x: e.clientX, y: e.clientY }; }}
+											onmouseenter={(e) => { hoveredId = r.id; mapTooltip = { r, x: e.clientX, y: e.clientY }; }}
 											onmousemove={(e) => { mapTooltip = { r, x: e.clientX, y: e.clientY }; }}
-											onmouseleave={() => { mapTooltip = null; }}
+											onmouseleave={() => { hoveredId = null; mapTooltip = null; }}
 										/>
 									{/if}
 								{/each}
@@ -913,7 +915,12 @@
 						<div class="resolver-list">
 							{#each propResults as r}
 								{@const col = propColor(r)}
-								<div class="resolver-row">
+								<div
+									class="resolver-row"
+									class:row-highlighted={hoveredId === r.id}
+									onmouseenter={() => { hoveredId = r.id; }}
+									onmouseleave={() => { hoveredId = null; }}
+								>
 									<span class="r-flag"><span class="fi fi-{r.iso}"></span></span>
 									<span class="r-city">{r.city}</span>
 									<span class="r-name">{r.name}</span>
@@ -1604,8 +1611,10 @@
 	.prop-type-pill:hover { border-color: var(--border-hover); color: var(--text); }
 	.prop-type-pill.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 
-	.resolver-dot { transition: r 0.15s ease; cursor: default; }
+	.resolver-dot { transition: r 0.15s ease, stroke-width 0.15s; cursor: default; }
 	.resolver-dot:hover { r: 7; }
+	.resolver-dot.highlighted { r: 9; stroke: #fff; stroke-width: 2; }
+	.row-highlighted { background: #1a1a1a; }
 
 	.map-tooltip {
 		position: fixed;
@@ -1642,9 +1651,12 @@
 		grid-template-columns: 1.4rem 9rem 7rem 1fr auto auto 1rem;
 		align-items: center;
 		gap: 0.5rem 0.75rem;
-		padding: 0.45rem 0;
+		padding: 0.45rem 0.4rem;
 		border-bottom: 1px solid #0f0f0f;
+		border-radius: 4px;
 		font-family: var(--mono);
+		cursor: default;
+		transition: background 0.12s;
 		font-size: 0.73rem;
 	}
 
