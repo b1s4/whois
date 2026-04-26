@@ -19,5 +19,8 @@
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "spinners-react": "^1.0.11"
+  }
 }

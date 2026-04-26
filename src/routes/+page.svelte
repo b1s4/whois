@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fade } from 'svelte/transition';
+	import { fade, slide } from 'svelte/transition';
 	import { DNS_GROUPS, DNS_TYPE_INFO, ALL_DNS_TYPES, formatTTL } from '$lib/dns-types';
 	import type { DnsTypeResult } from '$lib/dns-types';
 
@@ -83,8 +83,17 @@
 		finally { rdapLoading = false; }
 	}
 
+	let openNotices = $state(new Set<number>());
+
+	function toggleNotice(i: number) {
+		const next = new Set(openNotices);
+		next.has(i) ? next.delete(i) : next.add(i);
+		openNotices = next;
+	}
+
 	function reset() {
 		submitted = ''; query = ''; dnsRecords = {}; rdapData = null; dnsError = ''; rdapError = '';
+		openNotices = new Set();
 	}
 
 	function handleKeydown(e: KeyboardEvent) { if (e.key === 'Enter') submit(); }
@@ -305,7 +314,7 @@
      POST-SEARCH
 ════════════════════════════════════════════════════════════════════════════ -->
 {:else}
-	<div class="results-layout" transition:fade={{ duration: 150 }}>
+	<div class="results-layout">
 
 		<!-- Sticky top bar -->
 		<div class="top-bar">
@@ -337,8 +346,24 @@
 			</div>
 		</div>
 
+		<!-- Globe loading state -->
+		{#if dnsLoading}
+			<div class="globe-screen" transition:fade={{ duration: 200 }}>
+				<svg class="spinner-svg" viewBox="0 0 66 66" width="62" height="62">
+					<circle cx="33" cy="33" r="28" fill="none" stroke="rgba(0,0,0,0.44)" stroke-width="10"/>
+					<circle cx="33" cy="33" r="28" fill="none" stroke="rgba(254,229,0,1)" stroke-width="10"
+						stroke-dasharray="44 132" stroke-linecap="round" class="spinner-arc"/>
+				</svg>
+
+				<div class="globe-info">
+					<span class="globe-domain">{submitted}</span>
+					<span class="globe-status">Scanning DNS records</span>
+				</div>
+			</div>
+
 		<!-- Results -->
-		<div class="results-container">
+		{:else}
+		<div class="results-container" transition:fade={{ duration: 200 }}>
 			<div class="domain-label">
 				<span class="domain-text">{submitted}</span>
 				{#if dnsLoading || rdapLoading}
@@ -712,13 +737,32 @@
 							{#if notices.length}
 								<div class="rdap-card">
 									<div class="rdap-card-title">Notices</div>
-									{#each notices as notice}
-										<div class="notice-block">
-											{#if notice.title}
-												<div class="notice-title">{notice.title}</div>
-											{/if}
-											{#if notice.description?.length}
-												<div class="notice-desc">{notice.description[0]}</div>
+									{#each notices as notice, i}
+										<div class="notice-item" class:open={openNotices.has(i)}>
+											<button class="notice-toggle" onclick={() => toggleNotice(i)}>
+												<span class="notice-toggle-title">{notice.title ?? 'Notice'}</span>
+												<span class="notice-chevron" class:rotated={openNotices.has(i)}>›</span>
+											</button>
+											{#if openNotices.has(i)}
+												<div class="notice-body" transition:slide={{ duration: 150 }}>
+													{#each notice.description ?? [] as line}
+														<p class="notice-desc">{line}</p>
+													{/each}
+													{#if notice.links?.length}
+														<div class="notice-links">
+															{#each notice.links as link}
+																{#if link.href}
+																	<a
+																		class="notice-link"
+																		href={link.href}
+																		target="_blank"
+																		rel="noopener noreferrer"
+																	>{link.href}</a>
+																{/if}
+															{/each}
+														</div>
+													{/if}
+												</div>
 											{/if}
 										</div>
 									{/each}
@@ -731,6 +775,7 @@
 
 			</div><!-- /results-grid -->
 		</div><!-- /results-container -->
+		{/if}<!-- /dnsLoading -->
 	</div><!-- /results-layout -->
 {/if}
 
@@ -1181,12 +1226,121 @@
 		color: var(--text);
 	}
 
-	/* ─── Notices ───────────────────────────────────────────────────────────── */
+	/* ─── Notices accordion ─────────────────────────────────────────────────── */
 
-	.notice-block { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
-	.notice-block:last-child { border-bottom: none; padding-bottom: 0; }
-	.notice-title { font-size: 0.72rem; font-weight: 500; color: var(--text); }
-	.notice-desc { font-size: 0.7rem; color: var(--text-muted); line-height: 1.5; }
+	.notice-item {
+		border-bottom: 1px solid var(--border);
+	}
+	.notice-item:last-child { border-bottom: none; }
+
+	.notice-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		background: transparent;
+		border: none;
+		padding: 0.55rem 0;
+		cursor: pointer;
+		gap: 0.5rem;
+		text-align: left;
+	}
+
+	.notice-toggle:hover .notice-toggle-title { color: var(--text); }
+
+	.notice-toggle-title {
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: var(--text-muted);
+		transition: color 0.12s;
+		flex: 1;
+	}
+
+	.notice-item.open .notice-toggle-title { color: var(--text); }
+
+	.notice-chevron {
+		font-size: 0.9rem;
+		color: var(--text-muted);
+		transition: transform 0.2s ease, color 0.12s;
+		flex-shrink: 0;
+		line-height: 1;
+	}
+
+	.notice-chevron.rotated { transform: rotate(90deg); color: var(--accent); }
+
+	.notice-body {
+		padding-bottom: 0.65rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.notice-desc { font-size: 0.72rem; color: var(--text-muted); line-height: 1.55; }
+
+	.notice-links { display: flex; flex-direction: column; gap: 0.2rem; margin-top: 0.15rem; }
+
+	.notice-link {
+		font-family: var(--mono);
+		font-size: 0.68rem;
+		color: var(--accent);
+		text-decoration: none;
+		opacity: 0.75;
+		word-break: break-all;
+	}
+
+	.notice-link:hover { opacity: 1; text-decoration: underline; }
+
+	/* ─── Globe loading screen ──────────────────────────────────────────────── */
+
+	.globe-screen {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 2.25rem;
+		padding: 3rem 1.5rem;
+	}
+
+
+
+	.spinner-arc {
+		transform-box: fill-box;
+		transform-origin: center;
+		animation: spin 0.99s linear infinite;
+	}
+
+	@keyframes spin {
+		from { transform: rotate(-90deg); }
+		to   { transform: rotate(270deg); }
+	}
+
+	.globe-info {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.globe-domain {
+		font-family: var(--mono);
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+
+	.globe-status {
+		font-family: var(--mono);
+		font-size: 0.68rem;
+		color: var(--text-muted);
+		letter-spacing: 0.05em;
+		animation: pulse-opacity 2s ease-in-out infinite;
+	}
+
+	@keyframes pulse-opacity {
+		0%, 100% { opacity: 0.3; }
+		50%       { opacity: 0.8; }
+	}
 
 	/* ─── Responsive ────────────────────────────────────────────────────────── */
 
