@@ -12,7 +12,10 @@
       "Bash(curl -s http://localhost:5174)",
       "Bash(curl -s \"http://localhost:5175/api/rdap?domain=google.com\")",
       "Bash(curl -s \"http://localhost:5177/api/rdap?domain=cloudflare.com\")",
-      "Bash(python3 -c \" import json, sys d = json.load\\(sys.stdin\\) print\\('handle:', d.get\\('handle'\\)\\) print\\('status:', d.get\\('status'\\)\\) print\\('events:', [e['eventAction'] for e in d.get\\('events',[]\\)]\\) print\\('dnssec delegationSigned:', d.get\\('secureDNS',{}\\).get\\('delegationSigned'\\)\\) print\\('dsData count:', len\\(d.get\\('secureDNS',{}\\).get\\('dsData',[]\\)\\)\\) print\\('nameservers:', [n['ldhName'] for n in d.get\\('nameservers',[]\\)]\\) print\\('entities:'\\) for e in d.get\\('entities',[]\\): print\\(' ', e.get\\('roles'\\), e.get\\('handle'\\), '| nested:', [n.get\\('roles'\\) for n in e.get\\('entities',[]\\)]\\) vc = e.get\\('vcardArray'\\) if vc: print\\(' vcard fields:', [f[0] for f in vc[1]]\\) print\\('notices:', [n.get\\('title'\\) for n in d.get\\('notices',[]\\)]\\) print\\('links:', [l.get\\('rel'\\) for l in d.get\\('links',[]\\)]\\) \" pkill -f \"vite dev\")"
+      "Bash(python3 -c \" import json, sys d = json.load\\(sys.stdin\\) print\\('handle:', d.get\\('handle'\\)\\) print\\('status:', d.get\\('status'\\)\\) print\\('events:', [e['eventAction'] for e in d.get\\('events',[]\\)]\\) print\\('dnssec delegationSigned:', d.get\\('secureDNS',{}\\).get\\('delegationSigned'\\)\\) print\\('dsData count:', len\\(d.get\\('secureDNS',{}\\).get\\('dsData',[]\\)\\)\\) print\\('nameservers:', [n['ldhName'] for n in d.get\\('nameservers',[]\\)]\\) print\\('entities:'\\) for e in d.get\\('entities',[]\\): print\\(' ', e.get\\('roles'\\), e.get\\('handle'\\), '| nested:', [n.get\\('roles'\\) for n in e.get\\('entities',[]\\)]\\) vc = e.get\\('vcardArray'\\) if vc: print\\(' vcard fields:', [f[0] for f in vc[1]]\\) print\\('notices:', [n.get\\('title'\\) for n in d.get\\('notices',[]\\)]\\) print\\('links:', [l.get\\('rel'\\) for l in d.get\\('links',[]\\)]\\) \" pkill -f \"vite dev\")",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
