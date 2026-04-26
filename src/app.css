@@ -1,0 +1,56 @@
+:root {
+	--bg: #000000;
+	--surface: #080808;
+	--surface-2: #111111;
+	--border: #1c1c1c;
+	--border-hover: #2e2e2e;
+	--accent: #fee500;
+	--accent-dim: rgba(254, 229, 0, 0.08);
+	--accent-text: #000000;
+	--text: #f0f0f0;
+	--text-muted: #5a5a5a;
+	--text-dim: #333333;
+	--error: #ff4545;
+	--error-dim: rgba(255, 69, 69, 0.08);
+	--sans: 'Inter', system-ui, -apple-system, sans-serif;
+	--mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+*, *::before, *::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html {
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--sans);
+	font-size: 15px;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+body {
+	min-height: 100dvh;
+	background: var(--bg);
+}
+
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--border-hover);
+	border-radius: 3px;
+}
+
+::selection {
+	background: var(--accent);
+	color: var(--accent-text);
+}

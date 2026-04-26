@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(node *)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s \"http://localhost:5173/api/dns?domain=google.com&types=A,MX,NS,TXT\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:5173/api/rdap?domain=google.com\")",
+      "Bash(pkill -f \"vite dev\")",
+      "Bash(curl -s http://localhost:5174)",
+      "Bash(curl -s \"http://localhost:5175/api/rdap?domain=google.com\")"
+    ]
+  }
+}
