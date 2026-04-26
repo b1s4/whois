@@ -92,7 +92,7 @@ async function queryBinary(resolverUrl: string, domain: string, qtype: string, s
 	const rcode = (decoded.flags ?? 0) & 0xf;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const answers = (decoded.answers ?? []).map((a: any) => ({
-		type: 0,
+		type: TYPE_CODES[a.type] ?? 0,
 		data: serializeBinaryData(a.type, a.data),
 		TTL: (a.ttl ?? 0) as number,
 	}));
