@@ -2,6 +2,23 @@
 	import { fade, slide } from 'svelte/transition';
 	import { DNS_GROUPS, DNS_TYPE_INFO, ALL_DNS_TYPES, formatTTL } from '$lib/dns-types';
 	import type { DnsTypeResult } from '$lib/dns-types';
+	import { geoNaturalEarth1, geoPath, geoGraticule10 } from 'd3-geo';
+	import { feature } from 'topojson-client';
+	import worldJson from 'world-atlas/countries-110m.json';
+
+	// ─── World map (computed once, module-level) ─────────────────────────────────
+	const MAP_W = 960, MAP_H = 500;
+	const _proj  = geoNaturalEarth1().fitSize([MAP_W, MAP_H], { type: 'Sphere' });
+	const _path  = geoPath(_proj);
+	const _land  = feature(worldJson as any, (worldJson as any).objects.land);
+	const _grat  = geoGraticule10();
+	const landPath   = _path(_land as any) ?? '';
+	const gratPath   = _path(_grat as any) ?? '';
+	const spherePath = _path({ type: 'Sphere' }) ?? '';
+	function project(lon: number, lat: number): [number, number] | null {
+		return _proj([lon, lat]) as [number, number] | null;
+	}
+
 
 	type GroupKey = keyof typeof DNS_GROUPS | 'all';
 
@@ -17,6 +34,29 @@
 	let rdapLoading = $state(false);
 	let dnsError    = $state('');
 	let rdapError   = $state('');
+
+	interface PropResult {
+		id: string; name: string; city: string; flag: string;
+		lat: number; lon: number;
+		ips: string[]; ttl: number | null;
+		status: 'ok' | 'nxdomain' | 'error' | 'timeout'; ms: number;
+	}
+	let propResults  = $state<PropResult[]>([]);
+	let propLoading  = $state(false);
+
+	const majorityIp = $derived.by((): string => {
+		const counts = new Map<string, number>();
+		for (const r of propResults) for (const ip of r.ips) counts.set(ip, (counts.get(ip) ?? 0) + 1);
+		let max = 0, best = '';
+		for (const [ip, n] of counts) if (n > max) { max = n; best = ip; }
+		return best;
+	});
+
+	function propColor(r: PropResult): string {
+		if (r.status === 'ok') return r.ips.includes(majorityIp) ? 'var(--accent)' : '#f97316';
+		if (r.status === 'nxdomain') return '#ef4444';
+		return '#3a3a3a';
+	}
 
 	// ─── DNS helpers ─────────────────────────────────────────────────────────────
 
@@ -55,10 +95,12 @@
 		submitted   = domain;
 		dnsRecords  = {};
 		rdapData    = null;
+		propResults = [];
 		dnsError    = '';
 		rdapError   = '';
 		searchDNS(domain);
 		searchRDAP(domain);
+		searchPropagation(domain);
 	}
 
 	async function searchDNS(domain: string) {
@@ -83,6 +125,16 @@
 		finally { rdapLoading = false; }
 	}
 
+	async function searchPropagation(domain: string) {
+		propLoading = true;
+		try {
+			const res  = await fetch(`/api/propagation?domain=${encodeURIComponent(domain)}`);
+			const data = await res.json();
+			if (!data.error) propResults = data.results;
+		} catch {}
+		finally { propLoading = false; }
+	}
+
 	let openNotices = $state(new Set<number>());
 
 	function toggleNotice(i: number) {
@@ -92,7 +144,7 @@
 	}
 
 	function reset() {
-		submitted = ''; query = ''; dnsRecords = {}; rdapData = null; dnsError = ''; rdapError = '';
+		submitted = ''; query = ''; dnsRecords = {}; rdapData = null; propResults = []; dnsError = ''; rdapError = '';
 		openNotices = new Set();
 	}
 
@@ -774,6 +826,81 @@
 				</section>
 
 			</div><!-- /results-grid -->
+
+			<!-- ════════════════ PROPAGATION ════════════════ -->
+			{#if propLoading || propResults.length > 0}
+				<div class="prop-section" transition:fade={{ duration: 200 }}>
+					<div class="prop-header">
+						<span class="prop-title">PROPAGATION</span>
+						{#if !propLoading}
+							<span class="prop-meta">
+								A record · {propResults.filter(r => r.status === 'ok').length}/{propResults.length} resolvers responded
+							</span>
+						{/if}
+					</div>
+
+					{#if propLoading}
+						<div class="prop-loading">
+							<svg class="spinner-svg" viewBox="0 0 66 66" width="28" height="28">
+								<circle cx="33" cy="33" r="28" fill="none" stroke="rgba(0,0,0,0.44)" stroke-width="10"/>
+								<circle cx="33" cy="33" r="28" fill="none" stroke="rgba(254,229,0,1)" stroke-width="10"
+									stroke-dasharray="44 132" stroke-linecap="round" class="spinner-arc"/>
+							</svg>
+							<span class="prop-loading-text">Querying resolvers&hellip;</span>
+						</div>
+					{:else}
+						<!-- World map (d3-geo Natural Earth projection) -->
+						<div class="map-wrap">
+							<svg class="world-map" viewBox="0 0 {MAP_W} {MAP_H}" preserveAspectRatio="xMidYMid meet">
+								<path d={spherePath} class="sphere-bg"/>
+								<path d={gratPath}   class="graticule"/>
+								<path d={landPath}   class="land"/>
+								<path d={spherePath} class="sphere-border"/>
+								{#each propResults as r}
+									{@const pos = project(r.lon, r.lat)}
+									{#if pos}
+										<circle
+											class="resolver-dot"
+											cx={pos[0]} cy={pos[1]} r="5"
+											fill={propColor(r)}
+											stroke="var(--bg)" stroke-width="1.5"
+										>
+											<title>{r.flag} {r.city} — {r.name}: {r.ips.join(', ') || r.status}</title>
+										</circle>
+									{/if}
+								{/each}
+							</svg>
+						</div>
+
+						<!-- Resolver rows -->
+						<div class="resolver-list">
+							{#each propResults as r}
+								{@const col = propColor(r)}
+								<div class="resolver-row">
+									<span class="r-flag">{r.flag}</span>
+									<span class="r-city">{r.city}</span>
+									<span class="r-name">{r.name}</span>
+									<span class="r-ips">
+										{#if r.ips.length}
+											{#each r.ips as ip}<span class="r-ip">{ip}</span>{/each}
+										{:else}
+											<span class="r-noip">{r.status}</span>
+										{/if}
+									</span>
+									{#if r.ttl !== null}
+										<span class="r-ttl">TTL {r.ttl}s</span>
+									{:else}
+										<span class="r-ttl dim">—</span>
+									{/if}
+									<span class="r-ms dim">{r.ms}ms</span>
+									<span class="r-dot" style="color:{col}">●</span>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 		</div><!-- /results-container -->
 		{/if}<!-- /dnsLoading -->
 	</div><!-- /results-layout -->
@@ -1355,5 +1482,138 @@
 		.search-btn { padding: 0 1rem; }
 		.results-container { padding: 1rem 1rem 4rem; }
 		.top-bar-inner { padding: 0.5rem 1rem; }
+	}
+
+	/* ─── Propagation ────────────────────────────────────────────────────────── */
+
+	.prop-section {
+		margin-top: 2.5rem;
+		border-top: 1px solid var(--border);
+		padding-top: 1.75rem;
+	}
+
+	.prop-header {
+		display: flex;
+		align-items: baseline;
+		gap: 1rem;
+		margin-bottom: 1.25rem;
+	}
+
+	.prop-title {
+		font-family: var(--mono);
+		font-size: 0.68rem;
+		font-weight: 600;
+		letter-spacing: 0.12em;
+		color: var(--accent);
+	}
+
+	.prop-meta {
+		font-family: var(--mono);
+		font-size: 0.68rem;
+		color: var(--text-muted);
+	}
+
+	.prop-loading {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 1.5rem 0;
+	}
+
+	.prop-loading-text {
+		font-family: var(--mono);
+		font-size: 0.75rem;
+		color: var(--text-muted);
+	}
+
+	/* Map */
+	.map-wrap {
+		width: 100%;
+		background: #040404;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		overflow: hidden;
+		margin-bottom: 1.25rem;
+	}
+
+	.world-map {
+		width: 100%;
+		height: auto;
+		display: block;
+	}
+
+	.sphere-bg     { fill: #060606; }
+	.sphere-border { fill: none; stroke: #222; stroke-width: 1; }
+	.graticule     { fill: none; stroke: #111; stroke-width: 0.4; }
+	.land          { fill: #141414; stroke: #252525; stroke-width: 0.5; }
+
+	.resolver-dot { transition: r 0.15s ease; }
+	.resolver-dot:hover { r: 7; }
+
+	/* Resolver list */
+	.resolver-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+	}
+
+	.resolver-row {
+		display: grid;
+		grid-template-columns: 1.4rem 9rem 7rem 1fr auto auto 1rem;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		padding: 0.45rem 0;
+		border-bottom: 1px solid #0f0f0f;
+		font-family: var(--mono);
+		font-size: 0.73rem;
+	}
+
+	.r-flag { font-size: 0.85rem; }
+
+	.r-city {
+		color: var(--text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.r-name {
+		color: var(--text-dim);
+		white-space: nowrap;
+	}
+
+	.r-ips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+
+	.r-ip {
+		color: var(--text);
+		background: var(--surface);
+		padding: 0.1rem 0.35rem;
+		border-radius: 3px;
+		font-size: 0.7rem;
+	}
+
+	.r-noip {
+		color: #555;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.r-ttl { color: var(--text-dim); font-size: 0.68rem; white-space: nowrap; }
+	.r-ms  { color: var(--text-dim); font-size: 0.68rem; white-space: nowrap; text-align: right; }
+	.r-dot { font-size: 0.6rem; line-height: 1; text-align: right; }
+	.dim   { color: #444 !important; }
+
+	@media (max-width: 600px) {
+		.resolver-row {
+			grid-template-columns: 1.4rem 1fr auto 1rem;
+			grid-template-rows: auto auto;
+		}
+		.r-name { display: none; }
+		.r-ttl  { display: none; }
 	}
 </style>
