@@ -55,39 +55,6 @@ All propagation queries run server-side to avoid CORS restrictions. Resolvers th
 | Binary DoH | [dns-packet](https://github.com/mafintosh/dns-packet) (RFC 8484) |
 | Flag icons | [flag-icons](https://github.com/lipis/flag-icons) |
 | Language | TypeScript |
-
----
-
-## API Routes
-
-All routes are protected at the server level — requests must originate from the same origin (browser `Sec-Fetch-Site: same-origin`). Direct access from curl, Postman, or external sites returns `403 Forbidden`.
-
-### `GET /api/dns`
-
-Queries DNS records for a domain.
-
-| Parameter | Required | Description |
-|---|---|---|
-| `domain` | Yes | Domain name (also accepts URLs — strips protocol and path) |
-| `types` | No | Comma-separated list of record types. Defaults to A, AAAA, MX, NS, TXT, CNAME, SOA, CAA, SRV, DNSKEY, DS |
-
-### `GET /api/rdap`
-
-Fetches RDAP registration data for a domain.
-
-| Parameter | Required | Description |
-|---|---|---|
-| `domain` | Yes | Domain name |
-
-### `GET /api/propagation`
-
-Queries a specific DNS record type across all global resolvers.
-
-| Parameter | Required | Description |
-|---|---|---|
-| `domain` | Yes | Domain name |
-| `type` | No | Record type (default: `A`). Supports A, AAAA, CNAME, MX, NS, PTR, SRV, SOA, TXT, CAA, DS, DNSKEY and more |
-
 ---
 
 ## Running Locally
