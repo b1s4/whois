@@ -157,6 +157,15 @@
 	}
 
 	onMount(() => {
+		const saved = localStorage.getItem('whois-accent');
+		if (saved) {
+			setAccent(saved);
+			if (!ACCENT_PRESETS.some(p => p.value === saved)) {
+				[cpHue, cpSat, cpVal] = hexToHsv(saved);
+				customHexInput = saved.slice(1);
+			}
+		}
+
 		if (data.domain) {
 			query = data.domain;
 			submit();
@@ -350,17 +359,261 @@
 	function truncate(s: string, n = 48): string {
 		return s.length > n ? s.slice(0, n) + '…' : s;
 	}
+
+	// ─── Clipboard ────────────────────────────────────────────────────────────────
+
+	let copiedKey = $state<string | null>(null);
+
+	async function copyText(text: string, key: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+			copiedKey = key;
+			setTimeout(() => { if (copiedKey === key) copiedKey = null; }, 1400);
+		} catch {}
+	}
+
+	// ─── Settings ─────────────────────────────────────────────────────────────────
+
+	const ACCENT_PRESETS = [
+		{ name: 'yellow',  value: '#fee500' },
+		{ name: 'green',   value: '#00e040' },
+		{ name: 'cyan',    value: '#00c8ff' },
+		{ name: 'blue',    value: '#2979ff' },
+		{ name: 'purple',  value: '#9333ea' },
+		{ name: 'orange',  value: '#ff6d00' },
+		{ name: 'red',     value: '#ff2222' },
+		{ name: 'white',   value: '#e2e2e2' },
+	] as const;
+
+	let settingsOpen   = $state(false);
+	let accentColor    = $state('#fee500');
+	let customExpanded = $state(false);
+	let customHexInput = $state('');
+	let cpHue          = $state(50);
+	let cpSat          = $state(100);
+	let cpVal          = $state(100);
+
+	const isCustomActive = $derived(!ACCENT_PRESETS.some(p => p.value === accentColor));
+
+	function hsvToHex(h: number, s: number, v: number): string {
+		s /= 100; v /= 100;
+		const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+		let r = 0, g = 0, b = 0;
+		if      (h < 60)  { r = c; g = x; }
+		else if (h < 120) { r = x; g = c; }
+		else if (h < 180) {        g = c; b = x; }
+		else if (h < 240) {        g = x; b = c; }
+		else if (h < 300) { r = x;        b = c; }
+		else              { r = c;        b = x; }
+		const hex = (n: number) => Math.round((n + m) * 255).toString(16).padStart(2, '0');
+		return '#' + hex(r) + hex(g) + hex(b);
+	}
+
+	function hexToHsv(hex: string): [number, number, number] {
+		const r = parseInt(hex.slice(1, 3), 16) / 255;
+		const g = parseInt(hex.slice(3, 5), 16) / 255;
+		const b = parseInt(hex.slice(5, 7), 16) / 255;
+		const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+		let h = 0;
+		if (d) {
+			if      (mx === r) h = ((g - b) / d + 6) % 6 * 60;
+			else if (mx === g) h = ((b - r) / d + 2) * 60;
+			else               h = ((r - g) / d + 4) * 60;
+		}
+		return [Math.round(h), mx ? Math.round(d / mx * 100) : 0, Math.round(mx * 100)];
+	}
+
+	function expandHex(h: string): string | null {
+		const s = h.replace(/[^0-9a-fA-F]/g, '');
+		if (s.length === 3) return '#' + s[0]+s[0] + s[1]+s[1] + s[2]+s[2];
+		if (s.length === 6) return '#' + s;
+		return null;
+	}
+
+	function setAccent(color: string) {
+		accentColor = color;
+		const r = parseInt(color.slice(1, 3), 16);
+		const g = parseInt(color.slice(3, 5), 16);
+		const b = parseInt(color.slice(5, 7), 16);
+		document.documentElement.style.setProperty('--accent', color);
+		document.documentElement.style.setProperty('--accent-dim', `rgba(${r},${g},${b},0.08)`);
+		const lum = r * 0.299 + g * 0.587 + b * 0.114;
+		document.documentElement.style.setProperty('--accent-text', lum > 160 ? '#000000' : '#ffffff');
+		localStorage.setItem('whois-accent', color);
+	}
+
+	function selectPreset(color: string) {
+		customExpanded = false;
+		setAccent(color);
+	}
+
+	function applyHsv() {
+		const hex = hsvToHex(cpHue, cpSat, cpVal);
+		customHexInput = hex.slice(1);
+		setAccent(hex);
+	}
+
+	function toggleCustom() {
+		customExpanded = !customExpanded;
+		if (customExpanded) {
+			const init = isCustomActive ? accentColor
+				: (customHexInput.length === 6 ? '#' + customHexInput : '#888888');
+			[cpHue, cpSat, cpVal] = hexToHsv(init);
+			customHexInput = init.slice(1);
+		}
+	}
+
+	function onCustomHexInput(e: Event) {
+		const raw = (e.target as HTMLInputElement).value.replace(/[^0-9a-fA-F]/g, '');
+		customHexInput = raw;
+		const hex = expandHex(raw);
+		if (hex) { [cpHue, cpSat, cpVal] = hexToHsv(hex); setAccent(hex); }
+	}
+
+	function updateSvFromPointer(e: PointerEvent) {
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		cpSat = Math.round(Math.max(0, Math.min(100, (e.clientX - rect.left) / rect.width  * 100)));
+		cpVal = Math.round(Math.max(0, Math.min(100, (1 - (e.clientY - rect.top) / rect.height) * 100)));
+		applyHsv();
+	}
+
+	function startSvDrag(e: PointerEvent) {
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		updateSvFromPointer(e);
+	}
+
+	function onSvMove(e: PointerEvent) {
+		if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) updateSvFromPointer(e);
+	}
+
+	function closeSettings(e: MouseEvent) {
+		if (settingsOpen && !(e.target as Element)?.closest?.('.settings-wrap')) {
+			settingsOpen = false;
+		}
+	}
 </script>
 
 <svelte:head>
-	<title>whois — DNS & RDAP lookup</title>
+	<title>{submitted ? `${submitted} — whois_` : 'whois_ — DNS & RDAP lookup'}</title>
 </svelte:head>
+
+<svelte:window onclick={closeSettings} />
+
+{#snippet settingsBtn()}
+	<div class="top-actions">
+		<a
+			class="top-icon-btn"
+			href="https://github.com/b1s4/whois"
+			target="_blank"
+			rel="noopener noreferrer"
+			title="GitHub"
+			aria-label="GitHub repository"
+		>
+			<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.28 1.15-.28 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+		</a>
+
+		<div class="settings-wrap">
+			<button
+				class="top-icon-btn"
+				class:settings-active={settingsOpen}
+				onclick={(e) => { e.stopPropagation(); settingsOpen = !settingsOpen; }}
+				title="Settings"
+				aria-label="Settings"
+			>
+				<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.078 2.25c-.917 0-1.699.663-1.85 1.567L9.05 4.889c-.02.12-.115.26-.297.348a7.493 7.493 0 0 0-.986.57c-.166.115-.334.126-.45.083L6.3 5.508a1.875 1.875 0 0 0-2.282.819l-.922 1.597a1.875 1.875 0 0 0 .432 2.385l.84.692c.095.078.17.229.154.43a7.598 7.598 0 0 0 0 1.139c.015.2-.059.352-.153.43l-.841.692a1.875 1.875 0 0 0-.432 2.385l.922 1.597a1.875 1.875 0 0 0 2.282.818l1.019-.382c.115-.043.283-.031.45.082.312.214.641.405.985.57.182.088.277.228.297.35l.178 1.071c.151.904.933 1.567 1.85 1.567h1.844c.916 0 1.699-.663 1.85-1.567l.178-1.072c.02-.12.114-.26.297-.349.344-.165.673-.356.985-.57.167-.114.335-.125.45-.082l1.02.382a1.875 1.875 0 0 0 2.28-.819l.923-1.597a1.875 1.875 0 0 0-.432-2.385l-.84-.692c-.095-.078-.17-.229-.154-.43a7.614 7.614 0 0 0 0-1.139c-.016-.2.059-.352.153-.43l.84-.692c.708-.582.891-1.59.433-2.385l-.922-1.597a1.875 1.875 0 0 0-2.282-.818l-1.02.382c-.114.043-.282.031-.449-.083a7.49 7.49 0 0 0-.985-.57c-.183-.087-.277-.227-.297-.348l-.179-1.072a1.875 1.875 0 0 0-1.85-1.567h-1.843ZM12 15.75a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5Z"/></svg>
+			</button>
+
+			{#if settingsOpen}
+				<div class="settings-panel">
+					<div class="settings-panel-head">
+						<span class="settings-panel-title">settings</span>
+					</div>
+					<div class="settings-body">
+						<span class="settings-group-label">accent color</span>
+						{#each ACCENT_PRESETS as preset}
+							<button
+								class="color-row"
+								class:color-row-active={accentColor === preset.value}
+								onclick={() => selectPreset(preset.value)}
+							>
+								<span class="color-row-dot" style="background:{preset.value}"></span>
+								<span class="color-row-name">{preset.name}</span>
+								{#if accentColor === preset.value}
+									<span class="color-row-check">✓</span>
+								{/if}
+							</button>
+						{/each}
+
+						<!-- Custom color row -->
+						<button
+							class="color-row"
+							class:color-row-active={isCustomActive}
+							onclick={toggleCustom}
+						>
+							<span
+								class="color-row-dot"
+								class:dot-custom={!isCustomActive}
+								style={isCustomActive ? `background:${accentColor}` : ''}
+							></span>
+							<span class="color-row-name">custom</span>
+							{#if isCustomActive}
+								<span class="color-row-check">✓</span>
+							{:else}
+								<span class="custom-chevron" class:custom-chevron-open={customExpanded}>›</span>
+							{/if}
+						</button>
+
+						{#if customExpanded}
+							<div class="cp-wrap" transition:slide={{ duration: 140 }}>
+								<!-- SV gradient square -->
+								<div
+									class="cp-sv"
+									style="--cp-hue:{cpHue}"
+									onpointerdown={startSvDrag}
+									onpointermove={onSvMove}
+									onpointerup={(e) => (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)}
+									aria-label="Color saturation and brightness"
+									role="application"
+								>
+									<div class="cp-sv-thumb" style="left:{cpSat}%;top:{100 - cpVal}%"></div>
+								</div>
+								<!-- Hue strip -->
+								<input
+									class="cp-hue"
+									type="range" min="0" max="360" step="1"
+									value={cpHue}
+									oninput={(e) => { cpHue = Number((e.target as HTMLInputElement).value); applyHsv(); }}
+								/>
+								<!-- Hex input row -->
+								<div class="cp-hex-row">
+									<span class="cp-hash">#</span>
+									<input
+										class="cp-hex-input"
+										type="text"
+										maxlength="6"
+										placeholder="fee500"
+										value={customHexInput}
+										oninput={onCustomHexInput}
+										spellcheck="false"
+										autocomplete="off"
+									/>
+									<span class="cp-preview" style="background:{hsvToHex(cpHue, cpSat, cpVal)}"></span>
+								</div>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/if}
+		</div>
+	</div>
+{/snippet}
 
 <!-- ═══════════════════════════════════════════════════════════════════════════
      PRE-SEARCH
 ════════════════════════════════════════════════════════════════════════════ -->
 {#if !submitted}
 	<main class="hero-layout" transition:fade={{ duration: 150 }}>
+		<div class="hero-settings-slot desktop-only">{@render settingsBtn()}</div>
 		<div class="hero-inner">
 			<header>
 				<div class="brand">
@@ -424,6 +677,7 @@
 						{/if}
 					</button>
 				</div>
+				<div class="settings-topbar desktop-only">{@render settingsBtn()}</div>
 			</div>
 		</div>
 
@@ -971,6 +1225,10 @@
 		{/if}<!-- /dnsLoading -->
 	</div><!-- /results-layout -->
 {/if}
+
+<div class="mobile-only mobile-fixed-actions">
+	{@render settingsBtn()}
+</div>
 
 <style>
 	/* ─── Shared search tokens ──────────────────────────────────────────────── */
@@ -1793,12 +2051,341 @@
 	.r-dot { font-size: 0.6rem; line-height: 1; text-align: right; }
 	.dim   { color: #444 !important; }
 
+	/* ─── Copy button ─────────────────────────────────────────────────────────── */
+
+	.copy-btn {
+		opacity: 0;
+		flex-shrink: 0;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		font-family: var(--mono);
+		font-size: 0.6rem;
+		color: var(--text-dim);
+		padding: 0.1rem 0.3rem;
+		border-radius: 2px;
+		transition: opacity 0.12s, color 0.12s;
+		letter-spacing: 0.04em;
+	}
+	.record-entry:hover .copy-btn { opacity: 1; }
+	.copy-btn:hover:not(.copied) { color: var(--text-muted); }
+	.copy-btn.copied { opacity: 1; color: var(--accent); }
+
+	@media (pointer: coarse) {
+		.copy-btn { opacity: 1; }
+	}
+
+	/* ─── Share / copy-link button ────────────────────────────────────────────── */
+
+	.share-btn {
+		margin-left: auto;
+		background: transparent;
+		border: 1px solid var(--border);
+		color: var(--text-muted);
+		font-family: var(--mono);
+		font-size: 0.62rem;
+		padding: 0.15rem 0.5rem;
+		border-radius: 3px;
+		cursor: pointer;
+		transition: border-color 0.12s, color 0.12s;
+		letter-spacing: 0.04em;
+	}
+	.share-btn:hover { border-color: var(--border-hover); color: var(--text); }
+	.share-btn.share-copied { border-color: var(--accent); color: var(--accent); }
+
+	/* ─── Expiry date colors ──────────────────────────────────────────────────── */
+
+	.expiry-warn   { color: #f97316 !important; }
+	.expiry-danger { color: var(--error) !important; }
+
+	/* ─── Settings & top actions ─────────────────────────────────────────────── */
+
+	.hero-layout { position: relative; }
+
+	.hero-settings-slot {
+		position: absolute;
+		top: 1.25rem;
+		right: 1.5rem;
+	}
+
+	.settings-topbar {
+		position: absolute;
+		right: 0;
+		display: flex;
+		align-items: center;
+	}
+
+	.top-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.15rem;
+	}
+
+	/* Shared icon button (GitHub + settings gear) */
+	.top-icon-btn {
+		background: transparent;
+		border: none;
+		color: var(--text-muted);
+		cursor: pointer;
+		padding: 0.3rem 0.35rem;
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		text-decoration: none;
+		transition: color 0.15s;
+	}
+	.top-icon-btn:hover       { color: var(--text); }
+	.top-icon-btn.settings-active { color: var(--accent); }
+
 	@media (max-width: 600px) {
-		.resolver-row {
-			grid-template-columns: 1.4rem 1fr auto 1rem;
-			grid-template-rows: auto auto;
+		.desktop-only { display: none !important; }
+
+		.mobile-fixed-actions > .top-actions {
+			position: fixed;
+			bottom: 1.5rem;
+			right: 1.5rem;
+			z-index: 1000;
 		}
-		.r-name { display: none; }
-		.r-ttl  { display: none; }
+
+		.top-icon-btn {
+			background: rgba(0,0,0,0.4);
+			border: 1px solid var(--border);
+			padding: 0.5rem 0.5rem;
+			backdrop-filter: blur(8px);
+		}
+		.top-icon-btn:hover {
+			background: rgba(0,0,0,0.6);
+		}
+
+		.settings-panel {
+			top: auto;
+			bottom: calc(100% + 0.6rem);
+		}
+	}
+
+	@media (min-width: 601px) {
+		.mobile-only { display: none !important; }
+	}
+
+	.settings-wrap { position: relative; }
+
+	/* Panel */
+	.settings-panel {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 0.6rem);
+		bottom: auto;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 5px;
+		width: 188px;
+		z-index: 200;
+		overflow: hidden;
+		box-shadow: 0 12px 32px rgba(0,0,0,0.7);
+	}
+
+	.settings-panel-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.55rem 0.75rem;
+		background: var(--surface-2);
+		border-bottom: 1px solid var(--border);
+	}
+
+	.settings-panel-title {
+		font-family: var(--mono);
+		font-size: 0.6rem;
+		font-weight: 600;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--accent);
+	}
+
+	.settings-body {
+		display: flex;
+		flex-direction: column;
+		padding: 0.4rem 0;
+	}
+
+	.settings-group-label {
+		font-family: var(--mono);
+		font-size: 0.57rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		color: var(--text-dim);
+		padding: 0.35rem 0.75rem 0.25rem;
+		display: block;
+	}
+
+	.color-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.32rem 0.75rem;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		width: 100%;
+		text-align: left;
+		transition: background 0.1s;
+	}
+	.color-row:hover      { background: var(--surface-2); }
+	.color-row-active     { background: var(--surface-2); }
+
+	.color-row-dot {
+		width: 0.6rem;
+		height: 0.6rem;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.color-row-name {
+		font-family: var(--mono);
+		font-size: 0.72rem;
+		color: var(--text-muted);
+		flex: 1;
+		transition: color 0.1s;
+	}
+	.color-row:hover .color-row-name { color: var(--text); }
+	.color-row-active .color-row-name { color: var(--text); }
+
+	.color-row-check {
+		font-family: var(--mono);
+		font-size: 0.62rem;
+		color: var(--accent);
+	}
+
+	.custom-chevron {
+		font-size: 0.85rem;
+		color: var(--text-dim);
+		transition: transform 0.18s ease, color 0.12s;
+		line-height: 1;
+	}
+	.custom-chevron-open { transform: rotate(90deg); color: var(--text-muted); }
+
+	/* Dot with conic gradient when no custom color picked yet */
+	.dot-custom {
+		background: conic-gradient(
+			#f87171, #fb923c, #fee500, #00e676, #22d3ee, #60a5fa, #a78bfa, #f87171
+		) !important;
+	}
+
+	/* ── Custom color picker ──────────────────────────────────────────────────── */
+
+	.cp-wrap {
+		border-top: 1px solid var(--border);
+		background: #0a0a0a;
+		padding: 0.55rem 0.6rem 0.6rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.45rem;
+	}
+
+	/* SV gradient square */
+	.cp-sv {
+		position: relative;
+		width: 100%;
+		height: 90px;
+		border-radius: 3px;
+		background:
+			linear-gradient(to top,  #000 0%, transparent 100%),
+			linear-gradient(to right, #fff 0%, hsl(var(--cp-hue), 100%, 50%) 100%);
+		cursor: crosshair;
+		touch-action: none;
+		user-select: none;
+		border: 1px solid #222;
+	}
+
+	.cp-sv-thumb {
+		position: absolute;
+		width: 11px;
+		height: 11px;
+		border-radius: 50%;
+		border: 2px solid #fff;
+		box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+		transform: translate(-50%, -50%);
+		pointer-events: none;
+	}
+
+	/* Hue strip */
+	.cp-hue {
+		-webkit-appearance: none;
+		appearance: none;
+		display: block;
+		width: 100%;
+		height: 8px;
+		border-radius: 4px;
+		border: none;
+		padding: 0;
+		margin: 0;
+		outline: none;
+		cursor: pointer;
+		background: linear-gradient(to right,
+			hsl(0,100%,50%), hsl(30,100%,50%), hsl(60,100%,50%),
+			hsl(90,100%,50%), hsl(120,100%,50%), hsl(150,100%,50%),
+			hsl(180,100%,50%), hsl(210,100%,50%), hsl(240,100%,50%),
+			hsl(270,100%,50%), hsl(300,100%,50%), hsl(330,100%,50%),
+			hsl(360,100%,50%)
+		);
+	}
+	.cp-hue::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		width: 12px; height: 12px;
+		border-radius: 50%;
+		background: #fff;
+		border: 1.5px solid rgba(0,0,0,0.25);
+		box-shadow: 0 1px 3px rgba(0,0,0,0.55);
+		cursor: pointer;
+	}
+	.cp-hue::-moz-range-thumb {
+		width: 12px; height: 12px;
+		border-radius: 50%;
+		background: #fff;
+		border: 1.5px solid rgba(0,0,0,0.25);
+		box-shadow: 0 1px 3px rgba(0,0,0,0.55);
+		cursor: pointer;
+	}
+
+	/* Hex input row */
+	.cp-hex-row {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		padding: 0.28rem 0.5rem;
+		background: var(--surface);
+	}
+
+	.cp-hash {
+		font-family: var(--mono);
+		font-size: 0.7rem;
+		color: var(--accent);
+		user-select: none;
+		flex-shrink: 0;
+	}
+
+	.cp-hex-input {
+		flex: 1;
+		min-width: 0;
+		background: transparent;
+		border: none;
+		outline: none;
+		font-family: var(--mono);
+		font-size: 0.7rem;
+		color: var(--text);
+		letter-spacing: 0.08em;
+		padding: 0;
+	}
+	.cp-hex-input::placeholder { color: var(--text-dim); }
+
+	.cp-preview {
+		width: 0.9rem;
+		height: 0.9rem;
+		border-radius: 50%;
+		flex-shrink: 0;
+		border: 1px solid rgba(255,255,255,0.12);
 	}
 </style>

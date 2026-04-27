@@ -1,4 +1,4 @@
-# whois_
+# Whois
 
 A fast, minimal DNS & RDAP lookup tool. Query any domain for its full DNS record set, registrar and ownership data via RDAP, and check DNS propagation across global resolvers — all from a single search.
 
@@ -29,7 +29,7 @@ Each record block shows the raw data, TTL formatted as seconds/minutes/hours/day
 
 Fetches registration and ownership data from the authoritative RDAP registry for the queried domain.
 
-- Resolves the correct RDAP server via the **IANA bootstrap registry** — queries always go to the authoritative source, not a generic gateway
+- Resolves the correct RDAP server via the **IANA bootstrap registry** — queries always go to the authoritative source.
 - Falls back to `rdap.org` and `rdap.arin.net` if the IANA lookup fails
 - Displays: registrar, registrant, admin and tech contacts, domain status codes, nameservers with glue IPs, DNSSEC DS records, key data, important dates (created, updated, expiry), and registry notices
 
@@ -37,27 +37,9 @@ Fetches registration and ownership data from the authoritative RDAP registry for
 
 ### DNS Propagation
 
-Checks how a domain resolves across 6 geographically distributed resolvers simultaneously, for any of 12 DNS record types.
-
-**Resolvers:**
-
-| Resolver | Location | Protocol |
-|---|---|---|
-| Cloudflare | San Francisco, US | DNS-over-HTTPS (JSON) |
-| Google | New York, US | DNS-over-HTTPS (JSON) |
-| NextDNS | Paris, FR | DNS-over-HTTPS (JSON) |
-| FFMUC | Munich, DE | DNS-over-HTTPS (RFC 8484 binary) |
-| DNS.SB | Singapore, SG | DNS-over-HTTPS (JSON) |
-| AdGuard | Nicosia, CY | DNS-over-HTTPS (JSON) |
+Checks how a domain resolves across geographically distributed resolvers simultaneously.
 
 **Supported record types:** A · AAAA · CNAME · MX · NS · PTR · SRV · SOA · TXT · CAA · DS · DNSKEY
-
-**Results include:**
-- An interactive world map (equirectangular projection via d3-geo + Natural Earth data) with a dot per resolver, color-coded by result status
-- Hovering a row highlights the corresponding dot on the map, and vice versa
-- A tooltip on each map dot showing the country flag, resolver name, resolved records, TTL, and latency
-- Color coding: green = matches majority answer, orange = different answer (possible split-brain), red = NXDOMAIN, grey = error or timeout
-- Per-resolver record data, TTL, response latency, and status
 
 All propagation queries run server-side to avoid CORS restrictions. Resolvers that block cloud/datacenter IPs have been excluded.
 
@@ -125,20 +107,3 @@ npm run build
 ```
 
 Requires Node.js 18+. No environment variables needed for local development.
-
----
-
-## Project Structure
-
-```
-src/
-├── hooks.server.ts          # Same-origin guard for all /api/* routes
-├── lib/
-│   └── dns-types.ts         # Record type definitions, groups, descriptions
-└── routes/
-    ├── +page.svelte          # Main UI
-    └── api/
-        ├── dns/+server.ts        # DNS lookup via Cloudflare DoH
-        ├── rdap/+server.ts       # RDAP lookup via IANA bootstrap
-        └── propagation/+server.ts # Multi-resolver propagation check
-```
